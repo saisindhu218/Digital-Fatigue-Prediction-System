@@ -1,0 +1,14 @@
+# Backend specific
+.env
+logs/
+*.log
+ml_models/*.pkl  # Already in root, but for clarity
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+test.db
+instance/
+*.sqlite
+*.sqlite3

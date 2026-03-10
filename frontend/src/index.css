@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 225 15% 6%;
+    --foreground: 210 20% 95%;
+
+    --card: 225 14% 9%;
+    --card-foreground: 210 20% 95%;
+
+    --popover: 225 14% 9%;
+    --popover-foreground: 210 20% 95%;
+
+    --primary: 250 80% 65%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 225 14% 14%;
+    --secondary-foreground: 210 20% 85%;
+
+    --muted: 225 12% 14%;
+    --muted-foreground: 215 12% 50%;
+
+    --accent: 250 80% 65%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 225 12% 16%;
+    --input: 225 12% 16%;
+    --ring: 250 80% 65%;
+
+    --radius: 0.75rem;
+
+    --success: 145 65% 48%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 10%;
+    --info: 200 85% 55%;
+    --info-foreground: 0 0% 100%;
+
+    --chart-primary: 250 80% 65%;
+    --chart-secondary: 200 85% 55%;
+    --chart-success: 145 65% 48%;
+    --chart-warning: 38 92% 55%;
+    --chart-danger: 0 72% 55%;
+
+    --sidebar-background: 225 15% 7%;
+    --sidebar-foreground: 210 20% 70%;
+    --sidebar-primary: 250 80% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 225 14% 12%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 225 12% 14%;
+    --sidebar-ring: 250 80% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-card/60 backdrop-blur-xl border border-border/50;
+  }
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--info))];
+  }
+  .glow-primary {
+    box-shadow: 0 0 40px -12px hsl(var(--primary) / 0.35);
+  }
+  .stat-card {
+    @apply glass-card rounded-xl p-5 transition-all duration-300 hover:border-border;
+  }
+}

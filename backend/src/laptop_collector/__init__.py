@@ -1,0 +1,1 @@
+# Laptop collector package initialization

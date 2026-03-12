@@ -10,15 +10,27 @@ router = APIRouter(prefix="/usage", tags=["usage"])
 feature_extractor = LiveFeatureExtractor()
 
 
+# ---------------- HELPER ----------------
+
+async def resolve_user(device_id: str):
+    device = await db.db.devices.find_one({"device_id": device_id})
+    if device:
+        return device.get("user_id")
+    return None
+
+
 # ---------------- LAPTOP DATA ----------------
 
 @router.post("/laptop")
 async def receive_laptop_usage(data: dict):
 
+    device_id = data.get("device_id")
+    user_id = await resolve_user(device_id)
+
     record = {
         "_id": str(uuid.uuid4()),
-        "user_id": data.get("user_id"),
-        "device_id": data.get("device_id"),
+        "user_id": user_id,
+        "device_id": device_id,
         "session_id": data.get("session_id"),
         "timestamp": datetime.utcnow(),
         "data_type": "laptop",
@@ -36,7 +48,8 @@ async def receive_laptop_usage(data: dict):
 
     await db.db.usage_data.insert_one(record)
 
-    await run_prediction(data.get("user_id"))
+    if user_id:
+        await run_prediction(user_id)
 
     return {"status": "ok"}
 
@@ -48,13 +61,19 @@ async def receive_laptop_batch(payload: dict):
 
     records = payload.get("records", [])
     inserted = 0
+    resolved_user = None
 
     for r in records:
 
+        device_id = r.get("device_id")
+        user_id = await resolve_user(device_id)
+
+        resolved_user = user_id
+
         record = {
             "_id": str(uuid.uuid4()),
-            "user_id": r.get("user_id"),
-            "device_id": r.get("device_id"),
+            "user_id": user_id,
+            "device_id": device_id,
             "session_id": r.get("session_id"),
             "timestamp": datetime.utcnow(),
             "data_type": "laptop",
@@ -71,11 +90,10 @@ async def receive_laptop_batch(payload: dict):
         }
 
         await db.db.usage_data.insert_one(record)
-
         inserted += 1
 
-    if inserted > 0:
-        await run_prediction(records[0].get("user_id"))
+    if inserted > 0 and resolved_user:
+        await run_prediction(resolved_user)
 
     return {"status": "ok", "records_inserted": inserted}
 
@@ -85,10 +103,13 @@ async def receive_laptop_batch(payload: dict):
 @router.post("/mobile")
 async def receive_mobile_usage(data: dict):
 
+    device_id = data.get("device_id")
+    user_id = await resolve_user(device_id)
+
     record = {
         "_id": str(uuid.uuid4()),
-        "user_id": data.get("user_id"),
-        "device_id": data.get("device_id"),
+        "user_id": user_id,
+        "device_id": device_id,
         "timestamp": datetime.utcnow(),
         "data_type": "mobile",
         "app_name": data.get("app_name"),
@@ -98,7 +119,8 @@ async def receive_mobile_usage(data: dict):
 
     await db.db.usage_data.insert_one(record)
 
-    await run_prediction(data.get("user_id"))
+    if user_id:
+        await run_prediction(user_id)
 
     return {"status": "ok"}
 
@@ -150,7 +172,7 @@ async def run_prediction(user_id: str):
 
     except Exception as e:
         print("❌ Prediction insert error:", e)
-
+        
 
 # ---------------- DASHBOARD DATA ----------------
 

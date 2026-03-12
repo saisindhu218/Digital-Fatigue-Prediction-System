@@ -21,12 +21,16 @@ API_BASE="http://localhost:8000"
 
 def get_active_user():
     try:
-        r=requests.get(f"{API_BASE}/api/v1/pairing/active-user",timeout=5)
-        data=r.json()
-        if data.get("user_id"):
-            return data["user_id"]
+        with open("../../active_user.txt", "r") as f:
+            data = f.read().strip()
+
+            if "|" in data:
+                return data.split("|")[1]
+
+            return data
     except:
         pass
+
     return "unknown_user"
 
 
@@ -53,6 +57,14 @@ class LaptopActivityLogger:
         self.app_switch_count=0
 
         self.activity_buffer=[]
+
+        # NEW → aggregation variables (10 minute window)
+        self.total_keystrokes=0
+        self.total_clicks=0
+        self.total_moves=0
+        self.total_switches=0
+        self.total_idle=0
+        self.sample_count=0
 
         self.start_input_listeners()
         self.start_window_monitor()
@@ -157,69 +169,86 @@ class LaptopActivityLogger:
 
         hour=now.hour
 
-        if 5<=hour<12: time_of_day="morning"
-        elif 12<=hour<17: time_of_day="afternoon"
-        elif 17<=hour<22: time_of_day="evening"
-        else: time_of_day="night"
-
+        if 5<=hour<12:
+            self.time_of_day="morning"
+        elif 12<=hour<17:
+            self.time_of_day="afternoon"
+        elif 17<=hour<22:
+            self.time_of_day="evening"
+        else:
+            self.time_of_day="night"
+        
         app=self.current_app if self.current_app else "Unknown"
         title=self.current_title if self.current_title else ""
 
         category=self.get_app_category(app,title)
+
+        # ---- aggregation instead of storing every minute ----
+
+        self.total_keystrokes+=self.keystroke_count
+        self.total_clicks+=self.mouse_click_count
+        self.total_moves+=self.mouse_move_count
+        self.total_switches+=self.app_switch_count
+        self.total_idle+=idle_seconds
+
+        self.sample_count+=1
+
+        print(f"[COLLECTED] {app} | Keys:{self.keystroke_count} | Clicks:{self.mouse_click_count} | Switches:{self.app_switch_count} | Idle:{int(idle_seconds)}s")
+
+        # reset minute counters
+        self.keystroke_count=0
+        self.mouse_click_count=0
+        self.mouse_move_count=0
+        self.app_switch_count=0
+
+
+    def send_to_server(self):
+
+        if self.sample_count==0:
+            return
+
+        now=datetime.now()
 
         data={
             "user_id":self.user_id,
             "device_id":self.device_id,
             "session_id":self.session_id,
             "timestamp":now.isoformat(),
-            "app_name":app,
-            "window_title":title,
-            "app_category":category,
-            "usage_duration":1,
-            "session_length_minutes":session_minutes,
-            "idle_time_seconds":idle_seconds,
-            "keystrokes":self.keystroke_count,
-            "mouse_clicks":self.mouse_click_count,
-            "mouse_moves":self.mouse_move_count,
-            "app_switches":self.app_switch_count,
-            "time_of_day":time_of_day
+            "active_app":self.current_app if self.current_app else "Unknown",
+            "app_category":self.get_app_category(self.current_app or "",self.current_title or ""),
+            "usage_duration":10,
+            "session_length_minutes":(now-self.session_start).total_seconds()/60,
+            "idle_time_seconds":self.total_idle,
+            "keystrokes":self.total_keystrokes,
+            "mouse_clicks":self.total_clicks,
+            "mouse_moves":self.total_moves,
+            "app_switches":self.total_switches,
+            "time_of_day": self.time_of_day
         }
-
-        self.activity_buffer.append(data)
-
-        print(f"[COLLECTED] {app} | Keys:{self.keystroke_count} | Clicks:{self.mouse_click_count} | Switches:{self.app_switch_count} | Idle:{int(idle_seconds)}s")
-
-        self.keystroke_count=0
-        self.mouse_click_count=0
-        self.mouse_move_count=0
-        self.app_switch_count=0
-
-        if len(self.activity_buffer)>=5:
-
-            self.send_to_server()
-
-    def send_to_server(self):
-
-        if not self.activity_buffer:
-            return
 
         try:
 
             r=requests.post(
                 f"{API_BASE}/api/v1/usage/laptop/batch",
-                json={"records":self.activity_buffer},
+                json={"records":[data]},
                 timeout=10
             )
 
             if r.status_code==200:
 
-                print(f"[SYNC] Sent {len(self.activity_buffer)} records")
+                print("[SYNC] Sent 1 aggregated 10-minute record")
 
-                self.activity_buffer.clear()
+                self.total_keystrokes=0
+                self.total_clicks=0
+                self.total_moves=0
+                self.total_switches=0
+                self.total_idle=0
+                self.sample_count=0
 
         except Exception as e:
 
             print("[NETWORK ERROR]",e)
+
 
     def start(self):
 
@@ -227,8 +256,11 @@ class LaptopActivityLogger:
         print("User:",self.user_id)
         print("Device:",self.device_id)
 
+        # collect usage every 1 minute
         schedule.every(1).minutes.do(self.collect_activity)
-        schedule.every(5).minutes.do(self.send_to_server)
+
+        # send aggregated record every 10 minutes
+        schedule.every(10).minutes.do(self.send_to_server)
 
         def loop():
             while True:
@@ -245,6 +277,7 @@ def main():
 
     user=get_active_user()
     device="laptop_"+uuid.uuid4().hex[:6]
+
     logger=LaptopActivityLogger(user,device)
     logger.start()
 

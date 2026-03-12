@@ -1,5 +1,6 @@
 import joblib
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from src.config import settings
 
@@ -85,13 +86,13 @@ class MLService:
 
             if self.is_loaded:
 
-                X = np.array([[
-                    features.get("screen_time", 0),
-                    features.get("avg_session", 0),
-                    features.get("breaks", 0),
-                    features.get("night_ratio", 0),
-                    features.get("productive_ratio", 0)
-                ]])
+                X = pd.DataFrame([{
+                    "screen_time": features.get("screen_time", 0),
+                    "avg_session": features.get("avg_session", 0),
+                    "breaks": features.get("breaks", 0),
+                    "night_ratio": features.get("night_ratio", 0),
+                    "productive_ratio": features.get("productive_ratio", 0)
+                }])
 
                 pred = self.fatigue_classifier.predict(X)[0]
                 label = self.fatigue_label_encoder.inverse_transform([pred])[0]
@@ -162,14 +163,14 @@ class MLService:
 
             if self.is_loaded:
 
-                X = np.array([[
-                    features.get("screen_time", 0),
-                    features.get("avg_session", 0),
-                    features.get("breaks", 0),
-                    features.get("night_ratio", 0),
-                    features.get("productive_ratio", 0),
-                    fatigue_score
-                ]])
+                X = pd.DataFrame([{
+                    "screen_time": features.get("screen_time", 0),
+                    "avg_session": features.get("avg_session", 0),
+                    "breaks": features.get("breaks", 0),
+                    "night_ratio": features.get("night_ratio", 0),
+                    "productive_ratio": features.get("productive_ratio", 0),
+                    "fatigue_score": fatigue_score
+                }])
 
                 loss = float(self.productivity_model.predict(X)[0])
 
@@ -219,8 +220,6 @@ class MLService:
         fatigue_level = fatigue_result.get("level", "Medium")
         fatigue_score = fatigue_result.get("score", 50)
 
-        # ----- fatigue based -----
-
         if fatigue_level == "High":
             recommendations.append({
                 "type": "fatigue",
@@ -235,16 +234,12 @@ class MLService:
                 "description": "High fatigue score detected. Try reducing continuous screen time."
             })
 
-        # ----- screen time -----
-
         if screen > 6:
             recommendations.append({
                 "type": "screen",
                 "title": "Limit long screen sessions",
                 "description": "Your screen time is high today. Consider adding short breaks every hour."
             })
-
-        # ----- context switching -----
 
         if switches > 20:
             recommendations.append({
@@ -253,16 +248,12 @@ class MLService:
                 "description": "Frequent app switching detected. Try batching similar tasks together."
             })
 
-        # ----- idle / distraction -----
-
         if idle > 0.25:
             recommendations.append({
                 "type": "productivity",
                 "title": "Reduce idle distractions",
                 "description": "High idle time detected. Consider using focus timers or blocking distracting apps."
             })
-
-        # ----- night usage -----
 
         if night > 0.4:
             recommendations.append({
@@ -271,16 +262,12 @@ class MLService:
                 "description": "Late-night screen activity may increase fatigue and reduce productivity."
             })
 
-        # ----- productivity loss -----
-
         if productivity_loss > 3:
             recommendations.append({
                 "type": "productivity",
                 "title": "Improve focus sessions",
                 "description": "Your productivity loss is high today. Try 25-minute focus sessions with breaks."
             })
-
-        # ----- positive reinforcement -----
 
         if productive > 0.7 and focus > 70:
             recommendations.append({

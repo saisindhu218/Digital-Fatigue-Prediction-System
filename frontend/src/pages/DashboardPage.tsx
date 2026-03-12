@@ -3,8 +3,8 @@ import { StatCard } from '@/components/StatCard';
 import { ChartCard } from '@/components/ChartCard';
 import { Brain, Activity, Monitor, Layers, TrendingDown } from 'lucide-react';
 import {
-LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+LineChart,Line,BarChart,Bar,PieChart,Pie,Cell,
+XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer
 } from 'recharts';
 
 const COLORS=[
@@ -32,30 +32,13 @@ const usageQuery=useUsageData();
 
 if(!usageQuery.data) return null;
 
-const {predictions,summary,laptop_usage,trends}=usageQuery.data;
+const {predictions,summary,laptop_usage}=usageQuery.data;
 
-/* ---------- CHART FALLBACK DATA ---------- */
+/* REAL TREND DATA FROM BACKEND */
+const fatigueTrend=usageQuery.data.trends?.fatigueTrend || [];
+const productivityTrend=usageQuery.data.trends?.productivityTrend || [];
 
-const defaultWeek=[
-{day:'Mon',score:0},
-{day:'Tue',score:0},
-{day:'Wed',score:0},
-{day:'Thu',score:0},
-{day:'Fri',score:0},
-{day:'Sat',score:0},
-{day:'Sun',score:0}
-];
-
-const fatigueTrend=trends?.fatigueTrend?.length
-?trends.fatigueTrend
-:defaultWeek;
-
-const productivityTrend=trends?.productivityTrend?.length
-?trends.productivityTrend
-:defaultWeek;
-
-/* ---------- APP USAGE ---------- */
-
+/* APP USAGE */
 const appData=laptop_usage?.length
 ?laptop_usage.map(u=>({
 name:u.active_app,
@@ -63,8 +46,7 @@ value:u.usage_duration
 }))
 :[{name:'No Data',value:1}];
 
-/* ---------- PRODUCTIVITY BREAKDOWN ---------- */
-
+/* PRODUCTIVITY BREAKDOWN */
 const breakdownEntries=Object.entries(
 predictions.productivity?.breakdown||{}
 );
@@ -80,8 +62,6 @@ return(
 Real-time digital fatigue & productivity insights
 </p>
 </div>
-
-{/* ---------- STAT CARDS ---------- */}
 
 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
@@ -114,8 +94,6 @@ icon={<Layers className="w-4 h-4"/>}
 />
 
 </div>
-
-{/* ---------- CHARTS ---------- */}
 
 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
@@ -165,8 +143,6 @@ icon={<Layers className="w-4 h-4"/>}
 
 </div>
 
-{/* ---------- APP USAGE ---------- */}
-
 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
 <ChartCard title="App Usage Distribution" subtitle="By duration">
@@ -198,8 +174,6 @@ dataKey="value"
 </ResponsiveContainer>
 
 </ChartCard>
-
-{/* ---------- PRODUCTIVITY LOSS ---------- */}
 
 <ChartCard
 title="Productivity Loss Breakdown"

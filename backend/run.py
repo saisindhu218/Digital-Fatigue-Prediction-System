@@ -33,7 +33,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 def check_requirements():
     print("Checking requirements...")
 
-    # .env check
     env_path = BASE_DIR / ".env"
     if env_path.exists():
         print(f"OK .env file found: {env_path}")
@@ -41,7 +40,6 @@ def check_requirements():
         print("ERROR .env file missing")
         return False
 
-    # ML Models check
     ml_models_path = BASE_DIR / "ml_models"
     if ml_models_path.exists():
         models = list(ml_models_path.glob("*.pkl"))
@@ -49,7 +47,6 @@ def check_requirements():
     else:
         print("WARNING ml_models folder missing")
 
-    # Python environment check
     print(f"Python executable: {sys.executable}")
 
     if ".venv" in sys.executable.lower() or "venv" in sys.executable.lower():
@@ -66,13 +63,10 @@ def check_requirements():
 def load_environment():
     try:
         from dotenv import load_dotenv
-
         env_path = BASE_DIR / ".env"
         load_dotenv(env_path)
-
         print("OK Environment variables loaded")
         return True
-
     except Exception as e:
         print("Failed loading .env:", e)
         return False
@@ -81,11 +75,7 @@ def load_environment():
 # ==============================
 # START ACTIVITY LOGGER
 # ==============================
-
 def start_activity_logger():
-    """
-    Start activity logger only if it is not already running
-    """
 
     logger_path = SRC_DIR / "laptop_collector" / "activity_logger.py"
 
@@ -94,25 +84,24 @@ def start_activity_logger():
         return
 
     try:
-        # Check running python processes
-        result = subprocess.check_output("tasklist", shell=True).decode()
+        import psutil
 
-        if "activity_logger.py" in result:
-            print("Activity Logger already running")
-            return
+        for proc in psutil.process_iter(['cmdline']):
+            cmdline = proc.info.get('cmdline')
+            if cmdline and "activity_logger.py" in " ".join(cmdline):
+                print("Activity Logger already running")
+                return
 
-        # Start logger
         subprocess.Popen(
             [sys.executable, str(logger_path)],
-            cwd=str(logger_path.parent),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            cwd=str(logger_path.parent)
         )
 
-        print("OK Activity Logger started in background")
+        print("OK Activity Logger started")
 
     except Exception as e:
         print("Failed to start activity logger:", e)
+
 # ==============================
 # START SERVER
 # ==============================
@@ -137,7 +126,6 @@ def main():
         print("Environment load failed.")
         return
 
-    # Start activity logger automatically
     start_activity_logger()
 
     print("\nStarting FastAPI server...")
@@ -146,18 +134,16 @@ def main():
     print("=" * 60)
 
     try:
-
-     uvicorn.run(
-        "src.app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        log_level="info"
-    )
-
+        uvicorn.run(
+            "src.app:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=False,
+            log_level="info"
+        )
     except Exception as e:
         print("Server failed:", e)
 
 
 if __name__ == "__main__":
-        main()
+    main()

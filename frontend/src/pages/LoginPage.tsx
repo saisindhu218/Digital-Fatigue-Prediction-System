@@ -24,11 +24,30 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (isLogin) {
-        await login(email, password);
-      } else {
-        await register(email, password, name);
-      }
-      navigate('/dashboard');
+
+  const result = await login(email, password);
+
+  const userId = localStorage.getItem("user_id");
+
+  if (userId) {
+    await fetch("http://localhost:8000/api/v1/pairing/save-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_id: userId
+      })
+    });
+  }
+
+} else {
+
+  await register(email, password, name);
+
+}
+
+navigate('/dashboard');
     } catch (err: unknown) {
       // If backend is unreachable, demo login
       const msg = err instanceof Error ? err.message : 'Something went wrong';

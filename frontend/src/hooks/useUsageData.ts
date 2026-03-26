@@ -16,10 +16,19 @@ export function useUsageData() {
         throw new Error("User not available");
       }
 
-      return await api.getUsageData(user.id);
+      const usage = await api.getUsageData(user.id);
+      const trends = await api.getTrends(user.id);
+
+      // attach trends safely
+      return {
+        ...usage,
+        trends
+      } as UsageResponse;
     },
 
-    staleTime: 30000,
-    refetchInterval: 15000
+    staleTime: 0,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true
   });
 }

@@ -127,7 +127,7 @@ async def login(user_data: UserLogin):
        # Save active user info for collectors
         try:
             with open("active_user.txt", "w") as f:
-             f.write(f"{user['_id']}|{user['full_name']}")
+             f.write(f"{user['full_name']}|{user['_id']}")
         except Exception as e:
          print("Failed to write active user:", e)
 

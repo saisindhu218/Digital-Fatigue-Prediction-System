@@ -169,7 +169,9 @@ async def verify_pairing(token: str, scanning_device_id: str):
 @router.get("/status")
 async def get_device_status():
 
-    if not ACTIVE_USER["user_id"]:
+    user_id = ACTIVE_USER["user_id"]
+
+    if not user_id:
         return {
             "laptop": False,
             "mobile": False,
@@ -177,20 +179,35 @@ async def get_device_status():
             "data_points": 0
         }
 
-    devices = await db.db.devices.find(
-        {"user_id": ACTIVE_USER["user_id"]}
-    ).to_list(100)
+    # get latest usage record
+    latest_usage = await db.db.usage_data.find_one(
+        {"user_id": user_id},
+        sort=[("timestamp", -1)]
+    )
 
-    laptop = any(d["device_type"] == "laptop" for d in devices)
-    mobile = any(d["device_type"] == "mobile" for d in devices)
+    if not latest_usage:
+        return {
+            "laptop": False,
+            "mobile": False,
+            "last_synced": None,
+            "data_points": 0
+        }
 
-    usage_count = await db.db.usage_data.count_documents({
-        "user_id": ACTIVE_USER["user_id"]
+    # detect laptop activity
+    laptop_count = await db.db.usage_data.count_documents({
+        "user_id": user_id,
+        "data_type": "laptop"
+    })
+
+    # detect mobile activity
+    mobile_count = await db.db.usage_data.count_documents({
+        "user_id": user_id,
+        "data_type": "mobile"
     })
 
     return {
-        "laptop": laptop,
-        "mobile": mobile,
-        "last_synced": datetime.utcnow().isoformat(),
-        "data_points": usage_count
+        "laptop": laptop_count > 0,
+        "mobile": mobile_count > 0,
+        "last_synced": latest_usage["timestamp"].isoformat(),
+        "data_points": laptop_count + mobile_count
     }

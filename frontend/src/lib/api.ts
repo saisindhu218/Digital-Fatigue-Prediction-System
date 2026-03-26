@@ -44,7 +44,8 @@ export const api = {
     });
 
     if (result.access_token) {
-      localStorage.setItem("auth_token", result.access_token);
+        localStorage.setItem("auth_token", result.access_token);
+        localStorage.setItem("user_id", result.user_id);
     }
 
     return result;

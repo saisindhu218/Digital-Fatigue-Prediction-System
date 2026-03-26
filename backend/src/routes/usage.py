@@ -13,9 +13,30 @@ feature_extractor = LiveFeatureExtractor()
 # ---------------- HELPER ----------------
 
 async def resolve_user(device_id: str):
+
     device = await db.db.devices.find_one({"device_id": device_id})
-    if device:
+
+    if device and device.get("user_id"):
         return device.get("user_id")
+
+    # 🔥 AUTO-FIX: get user from latest login/session
+    user = await db.db.users.find_one({}, sort=[("created_at", -1)])
+
+    if user:
+        user_id = user.get("_id")
+
+        # save mapping automatically
+        await db.db.devices.insert_one({
+            "device_id": device_id,
+            "user_id": user_id,
+            "linked_at": datetime.utcnow()
+        })
+
+        print(f"✅ Device mapped automatically: {device_id} → {user_id}")
+
+        return user_id
+
+    print("❌ No user found")
     return None
 
 
@@ -25,7 +46,7 @@ async def resolve_user(device_id: str):
 async def receive_laptop_usage(data: dict):
 
     device_id = data.get("device_id")
-    user_id = await resolve_user(device_id)
+    user_id = data.get("user_id") or await resolve_user(device_id)
 
     record = {
         "_id": str(uuid.uuid4()),
@@ -66,7 +87,7 @@ async def receive_laptop_batch(payload: dict):
     for r in records:
 
         device_id = r.get("device_id")
-        user_id = await resolve_user(device_id)
+        user_id = r.get("user_id") or await resolve_user(device_id)
 
         resolved_user = user_id
 
@@ -104,8 +125,8 @@ async def receive_laptop_batch(payload: dict):
 async def receive_mobile_usage(data: dict):
 
     device_id = data.get("device_id")
-    user_id = await resolve_user(device_id)
-
+    user_id = data.get("user_id") or await resolve_user(device_id)
+    
     record = {
         "_id": str(uuid.uuid4()),
         "user_id": user_id,
@@ -129,19 +150,33 @@ async def receive_mobile_usage(data: dict):
 
 async def run_prediction(user_id: str):
 
-    cutoff = datetime.utcnow() - timedelta(hours=6)
+    now = datetime.utcnow()
+
+    # find last prediction time
+    last_prediction = await db.db.predictions.find_one(
+        {"user_id": user_id},
+        sort=[("timestamp", -1)]
+    )
+
+    if last_prediction:
+        last_time = last_prediction["timestamp"]
+    else:
+        last_time = now - timedelta(minutes=10)
+
+    # 👉 take ONLY data after last prediction
+    cutoff = last_time
 
     laptop_data = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "laptop",
         "timestamp": {"$gte": cutoff}
-    }).to_list(200)
-
+    }).sort("timestamp", -1).limit(500).to_list(500)
+    
     mobile_data = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "mobile",
         "timestamp": {"$gte": cutoff}
-    }).to_list(200)
+    }).sort("timestamp", -1).limit(500).to_list(500)
 
     features = feature_extractor.extract_features_from_live_data(
         laptop_data,
@@ -185,13 +220,13 @@ async def get_recent_usage(user_id: str, hours: int = 24):
         "user_id": user_id,
         "data_type": "laptop",
         "timestamp": {"$gte": cutoff}
-    }).sort("timestamp", -1).to_list(500)
+    }).to_list(None)
 
     mobile = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "mobile",
         "timestamp": {"$gte": cutoff}
-    }).sort("timestamp", -1).to_list(500)
+    }).sort("timestamp", -1).to_list(100)
 
     predictions = await db.db.predictions.find({
         "user_id": user_id
@@ -200,9 +235,11 @@ async def get_recent_usage(user_id: str, hours: int = 24):
 
     # -------- SUMMARY --------
 
-    total_screen_time = sum(
+    total_minutes = sum(
         (u.get("usage_duration", 0) or 0) for u in laptop
-    ) / 60
+    )
+
+    total_screen_time = round(total_minutes / 60, 2)
 
     total_sessions = len(set(
         u.get("session_id") for u in laptop if u.get("session_id")
@@ -317,24 +354,71 @@ async def get_trends(user_id: str, days: int = 7):
     preds = await db.db.predictions.find({
         "user_id": user_id,
         "timestamp": {"$gte": cutoff}
-    }).sort("timestamp", 1).to_list(100)
+    }).sort("timestamp", 1).to_list(200)
 
     fatigue_trend = []
     productivity_trend = []
 
-    for p in preds:
+    if not preds:
+        return {
+            "fatigueTrend": [],
+            "productivityTrend": []
+        }
 
-        day = p["timestamp"].strftime("%a")
+    # check how many unique days exist
+    unique_days = list(set(p["timestamp"].strftime("%Y-%m-%d") for p in preds))
 
-        fatigue_trend.append({
-            "day": day,
-            "score": p.get("fatigue_score", 0)
-        })
+    # -------- CASE 1: ONLY ONE DAY (TODAY) --------
+    if len(unique_days) == 1:
 
-        productivity_trend.append({
-            "day": day,
-            "score": p.get("productivity_score", 0)
-        })
+        time_groups = {}
+
+        for p in preds:
+            time_label = p["timestamp"].strftime("%H:%M")
+
+            if time_label not in time_groups:
+                time_groups[time_label] = {"fatigue": [], "productivity": []}
+
+            time_groups[time_label]["fatigue"].append(p.get("fatigue_score", 0))
+            time_groups[time_label]["productivity"].append(p.get("productivity_score", 0))
+
+
+        for time_label, values in time_groups.items():
+
+            fatigue_trend.append({
+                "day": time_label,
+                "score": round(sum(values["fatigue"]) / len(values["fatigue"]), 2)
+            })
+
+            productivity_trend.append({
+                "day": time_label,
+                "score": round(sum(values["productivity"]) / len(values["productivity"]), 2)
+            })
+    # -------- CASE 2: MULTIPLE DAYS --------
+    else:
+
+        daily = {}
+
+        for p in preds:
+            day = p["timestamp"].strftime("%a")
+
+            if day not in daily:
+                daily[day] = {"fatigue": [], "productivity": []}
+
+            daily[day]["fatigue"].append(p.get("fatigue_score", 0))
+            daily[day]["productivity"].append(p.get("productivity_score", 0))
+
+        for day, values in daily.items():
+
+            fatigue_trend.append({
+                "day": day,
+                "score": round(sum(values["fatigue"]) / len(values["fatigue"]), 2)
+            })
+
+            productivity_trend.append({
+                "day": day,
+                "score": round(sum(values["productivity"]) / len(values["productivity"]), 2)
+            })
 
     return {
         "fatigueTrend": fatigue_trend,

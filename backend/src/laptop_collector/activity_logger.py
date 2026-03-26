@@ -24,14 +24,15 @@ def get_active_user():
         with open("../../active_user.txt", "r") as f:
             data = f.read().strip()
 
+            # format: name|user_id
             if "|" in data:
-                return data.split("|")[1]
+                return data.split("|")[1]   # ✅ RETURN UUID
 
-            return data
     except:
         pass
 
-    return "unknown_user"
+    print("❌ No active user found")
+    return None
 
 
 class LaptopActivityLogger:
@@ -193,7 +194,7 @@ class LaptopActivityLogger:
 
         self.sample_count+=1
 
-        print(f"[COLLECTED] {app} | Keys:{self.keystroke_count} | Clicks:{self.mouse_click_count} | Switches:{self.app_switch_count} | Idle:{int(idle_seconds)}s")
+        # silent collection (no per-minute logs)
 
         # reset minute counters
         self.keystroke_count=0
@@ -236,7 +237,7 @@ class LaptopActivityLogger:
 
             if r.status_code==200:
 
-                print("[SYNC] Sent 1 aggregated 10-minute record")
+                print(f"[SYNC] 10-min record sent | Samples: {self.sample_count}")
 
                 self.total_keystrokes=0
                 self.total_clicks=0
@@ -275,12 +276,46 @@ class LaptopActivityLogger:
 
 def main():
 
-    user=get_active_user()
-    device="laptop_"+uuid.uuid4().hex[:6]
+    user = get_active_user()
 
-    logger=LaptopActivityLogger(user,device)
+    # ---------------- LOAD OR CREATE DEVICE ID ----------------
+
+    device_file = "device_id.txt"
+
+    try:
+
+        with open(device_file, "r") as f:
+            device = f.read().strip()
+
+    except:
+
+        device = "laptop_" + uuid.uuid4().hex[:6]
+
+        with open(device_file, "w") as f:
+            f.write(device)
+
+    # ---------------- REGISTER DEVICE IN BACKEND ----------------
+
+    try:
+
+        requests.post(
+            f"{API_BASE}/api/v1/pairing/generate-qr",
+            json={
+                "device_id": device,
+                "device_type": "laptop",
+                "device_name": "User Laptop",
+                "user_id": user
+            },
+            timeout=5
+        )
+
+    except:
+        pass
+
+    # ---------------- START LOGGER ----------------
+
+    logger = LaptopActivityLogger(user, device)
     logger.start()
-
 
 if __name__=="__main__":
     main()

@@ -35,8 +35,15 @@ if(!usageQuery.data) return null;
 const {predictions,summary,laptop_usage}=usageQuery.data;
 
 /* REAL TREND DATA FROM BACKEND */
-const fatigueTrend=usageQuery.data.trends?.fatigueTrend || [];
-const productivityTrend=usageQuery.data.trends?.productivityTrend || [];
+const fatigueTrend =
+  usageQuery.data?.trends?.fatigueTrend?.length
+    ? usageQuery.data.trends.fatigueTrend
+    : [{ day: "No Data", score: 0 }];
+
+const productivityTrend =
+  usageQuery.data?.trends?.productivityTrend?.length
+    ? usageQuery.data.trends.productivityTrend
+    : [{ day: "No Data", score: 0 }];
 
 /* APP USAGE */
 const appData=laptop_usage?.length
@@ -50,6 +57,17 @@ value:u.usage_duration
 const breakdownEntries=Object.entries(
 predictions.productivity?.breakdown||{}
 );
+
+/*screen time user freindly*/
+function formatScreenTime(hours: number) {
+  const totalMinutes = Math.round(hours * 60);
+
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+
+  if (h === 0) return `${m} min`;
+  return `${h}h ${m}m`;
+}
 
 const totalLoss=predictions.productivity?.productivity_loss_hours||1;
 
@@ -81,7 +99,7 @@ icon={<Activity className="w-4 h-4"/>}
 
 <StatCard
 title="Screen Time"
-value={`${summary.total_screen_time}h`}
+value={formatScreenTime(summary.total_screen_time)}
 subtitle={`Peak: ${summary.peak_hours}`}
 icon={<Monitor className="w-4 h-4"/>}
 />
@@ -107,7 +125,11 @@ icon={<Layers className="w-4 h-4"/>}
 
 <XAxis dataKey="day" tick={{fill:'hsl(215,12%,50%)',fontSize:12}} axisLine={false}/>
 
-<YAxis tick={{fill:'hsl(215,12%,50%)',fontSize:12}} axisLine={false}/>
+<YAxis
+  tick={{ fill: 'hsl(215,12%,50%)', fontSize: 12 }}
+  axisLine={false}
+  domain={[0, 100]}
+/>
 
 <Tooltip {...tooltipStyle}/>
 
@@ -129,7 +151,11 @@ icon={<Layers className="w-4 h-4"/>}
 
 <XAxis dataKey="day" tick={{fill:'hsl(215,12%,50%)',fontSize:12}} axisLine={false}/>
 
-<YAxis tick={{fill:'hsl(215,12%,50%)',fontSize:12}} axisLine={false}/>
+<YAxis
+  tick={{ fill: 'hsl(215,12%,50%)', fontSize: 12 }}
+  axisLine={false}
+  domain={[0, 100]}
+/>
 
 <Tooltip {...tooltipStyle}/>
 

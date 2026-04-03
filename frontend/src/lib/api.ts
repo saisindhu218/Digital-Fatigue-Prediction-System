@@ -74,6 +74,9 @@ export const api = {
   getTrends: (userId: string) =>
     request(`/usage/user/${userId}/trends`),
 
+  getAnalytics: (userId: string) =>
+  request(`/usage/user/${userId}/analytics`),
+
   submitLaptopData: (data: unknown) =>
     request("/usage/laptop", {
       method: "POST",

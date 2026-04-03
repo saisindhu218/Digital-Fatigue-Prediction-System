@@ -11,132 +11,122 @@ const tooltipStyle = {
 };
 
 export default function AnalyticsPage() {
+  const now = new Date();  
+  const usageQuery = useUsageData();
 
-  const { data } = useUsageData();
-  if (!data) return null;
+  if (!usageQuery.data) return null;
 
-  const { summary, laptop_usage, mobile_usage } = data;
+  const { summary, laptop_usage } = usageQuery.data;
+  const analytics = usageQuery.data.analytics || {};
 
-  /* ---------------- DAILY USAGE (REAL DATA) ---------------- */
+/* ---------------- WEEKLY AVG SCREEN TIME ---------------- */
 
-  const hourlyMap: Record<string, { laptop: number; mobile: number }> = {};
+const dailyMap: Record<string, number> = {};
 
-  const hours = [
-    '6am','8am','10am','12pm','2pm','4pm','6pm','8pm','10pm'
-  ];
+laptop_usage.forEach(u => {
+  const dateObj = new Date((u as any).timestamp);
 
-  hours.forEach(h => {
-    hourlyMap[h] = { laptop: 0, mobile: 0 };
-  });
+  // ✅ FILTER LAST 7 DAYS ONLY
+  const diffMs = now.getTime() - dateObj.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
 
-  laptop_usage.forEach(u => {
+// allow slight buffer
+  if (diffDays > 8) return;
+  
+  const date = dateObj.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
 
-    const date = new Date((u as any).timestamp);
-    const h = date.getHours();
+  if (!dailyMap[date]) dailyMap[date] = 0;
 
-    const key =
-      h < 8 ? '6am' :
-      h < 10 ? '8am' :
-      h < 12 ? '10am' :
-      h < 14 ? '12pm' :
-      h < 16 ? '2pm' :
-      h < 18 ? '4pm' :
-      h < 20 ? '6pm' :
-      h < 22 ? '8pm' : '10pm';
+  const BATCH_MINUTES = 10;
+  dailyMap[date] += (u.usage_duration || 0) * BATCH_MINUTES;
+});
 
-    hourlyMap[key].laptop += (u.usage_duration || 0);
+// get number of days
+const days = Object.keys(dailyMap).length || 1;
 
-  });
+// total minutes
+const totalMinutes = Object.values(dailyMap).reduce((a, b) => a + b, 0);
 
-  mobile_usage.forEach(u => {
+// avg per day (in hours)
+const avgScreenTime = Math.round((totalMinutes / days / 60) * 100) / 100;
 
-    const date = new Date((u as any).timestamp);
-    const h = date.getHours();
+  /* ---------------- DAILY USAGE ---------------- */
 
-    const key =
-      h < 8 ? '6am' :
-      h < 10 ? '8am' :
-      h < 12 ? '10am' :
-      h < 14 ? '12pm' :
-      h < 16 ? '2pm' :
-      h < 18 ? '4pm' :
-      h < 20 ? '6pm' :
-      h < 22 ? '8pm' : '10pm';
+const dailyUsage = (usageQuery.data?.analytics?.daily ?? [])
+  .map((d: any) => {
+    const dateObj = new Date(d.date);
+    return {
+      date: dateObj.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short"
+      }),
+      usage: (d.usage || 0) / 60,
+      rawDate: dateObj
+    };
+  })
+  .sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime());
 
-    hourlyMap[key].mobile += (u.screen_time || 0);
+  /* ---------------- WEEKLY TREND (FIXED ORDER) ---------------- */
 
-  });
+const weeklyTrend = (analytics.weekly || []).map((w: any) => ({
+  week: w.day,
+  screenTime: Math.round((w.usage / 60) * 10) / 10,
+  focus: w.usage === 0 ? 0 : Math.max(40, 100 - (w.usage / 60) * 5)
+}));
 
-  const dailyUsage = hours.map(h => ({
-    hour: h,
-    laptop: Math.round(hourlyMap[h].laptop),
-    mobile: Math.round(hourlyMap[h].mobile)
-  }));
-
-
-  /* ---------------- WEEKLY TREND (REAL DATA) ---------------- */
-
-  const weeklyMap: Record<string, { screenTime: number }> = {};
-
-  laptop_usage.forEach(u => {
-
-    const date = new Date((u as any).timestamp);
-    const day = date.toLocaleDateString(undefined, { weekday: 'short' });
-
-    if (!weeklyMap[day]) {
-      weeklyMap[day] = { screenTime: 0 };
-    }
-
-    weeklyMap[day].screenTime += (u.usage_duration || 0) / 60;
-
-  });
-
-  const weeklyTrend = Object.keys(weeklyMap).map(day => ({
-    week: day,
-    screenTime: Math.round(weeklyMap[day].screenTime * 10) / 10,
-    focus: summary.focus_score
-  }));
-
-
-  /* ---------------- RADAR METRICS ---------------- */
+/* ---------------- RADAR ---------------- */
 
   const radarData = [
     { metric: 'Focus', value: summary.focus_score },
     { metric: 'Breaks', value: summary.break_frequency * 10 },
-    { metric: 'Consistency', value: summary.focus_score },
     { metric: 'Efficiency', value: summary.focus_score },
     { metric: 'Balance', value: 100 - summary.focus_score },
-    { metric: 'Recovery', value: summary.break_frequency * 15 },
   ];
 
 
-  /* ---------------- APP USAGE (AGGREGATED) ---------------- */
+  /* ---------------- APP USAGE ---------------- */
 
-  const appMap: Record<string, { duration: number; category: string }> = {};
+const appMap: Record<string, number> = {};
 
-  laptop_usage.forEach(a => {
+// 1️⃣ Fill data
+laptop_usage.forEach((a: any) => {
+  const date = new Date(a?.timestamp || Date.now());
+  const diffDays = (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24);
 
-    const name = a.active_app || "Unknown";
+  if (diffDays > 8) return;
 
-    if (!appMap[name]) {
-      appMap[name] = { duration: 0, category: a.app_category };
-    }
+  const name = a.active_app || "Unknown";
 
-    appMap[name].duration += a.usage_duration || 0;
+  if (!appMap[name]) {
+    appMap[name] = 0;
+  }
 
-  });
+  appMap[name] += a.usage_duration || 0;
+});
 
-  const appUsage = Object.keys(appMap)
-    .map(name => ({
-      active_app: name,
-      usage_duration: appMap[name].duration,
-      app_category: appMap[name].category
-    }))
-    .sort((a,b)=> b.usage_duration - a.usage_duration)
-    .slice(0,6);
+// 2️⃣ THEN calculate totals
+const totalAppTime = Object.values(appMap).reduce((a, b) => a + b, 0);
+const safeTotal = totalAppTime > 0 ? totalAppTime : 1;
 
-  const maxApp = Math.max(...appUsage.map(a => a.usage_duration));
+// 3️⃣ THEN build UI data
+const appUsage = Object.keys(appMap)
+  .map(name => ({
+    active_app: name,
+    usage_duration: appMap[name]
+  }))
+  .sort((a, b) => b.usage_duration - a.usage_duration)
+  .slice(0, 5);
+  
+function formatHoursToReadable(hours: number) {
+  const totalMinutes = Math.round(hours * 60);
 
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} hr`;
+  return `${h} hr ${m} min`;
+}
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -144,42 +134,28 @@ export default function AnalyticsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Detailed usage patterns and insights
+          Real usage insights
         </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-        <StatCard
-          title="Avg Daily Usage"
-          value={`${summary.total_screen_time}h`}
-          icon={<Clock className="w-4 h-4" />}
-        />
-
-        <StatCard
-          title="Focus Ratio"
-          value={`${summary.focus_score}%`}
-          icon={<Target className="w-4 h-4" />}
-        />
-
-        <StatCard
-          title="Most Used App"
-          value={summary.most_used_app}
-          icon={<Zap className="w-4 h-4" />}
-        />
-
-        <StatCard
-          title="Break Frequency"
-          value={`${summary.break_frequency}/day`}
-          icon={<Coffee className="w-4 h-4" />}
-        />
+        <StatCard 
+          title="Average Screen Time" 
+          subtitle="Average of last 7 days"
+          value={formatHoursToReadable(avgScreenTime)}
+          icon={<Clock />} 
+         />
+        <StatCard title="Focus" value={`${summary.focus_score}%`} icon={<Target />} />
+        <StatCard title="App" value={summary.most_used_app} icon={<Zap />} />
+        <StatCard title="Breaks" value={`${summary.break_frequency}`} icon={<Coffee />} />
 
       </div>
 
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-        <ChartCard title="Daily Usage Pattern" subtitle="Laptop vs Mobile usage by hour">
+        <ChartCard title="Daily Usage Pattern" subtitle="Daily screen time (last 7 days)">
 
           <ResponsiveContainer width="100%" height={250}>
 
@@ -187,15 +163,28 @@ export default function AnalyticsPage() {
 
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,12%,16%)" />
 
-              <XAxis dataKey="hour" tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }} axisLine={false} />
+              <XAxis dataKey="date" tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }} axisLine={false} />
 
-              <YAxis tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }} axisLine={false} />
+              <YAxis
+                tickFormatter={(v) => `${v}h`}
+                tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }}
+                axisLine={false}
+              />
 
-              <Tooltip {...tooltipStyle} />
+              <Tooltip
+                {...tooltipStyle}
+                formatter={(value: any) => {
+                  const totalMinutes = Math.round(value * 60);
+                  const h = Math.floor(totalMinutes / 60);
+                  const m = totalMinutes % 60;
 
-              <Bar dataKey="laptop" fill="hsl(250,80%,65%)" radius={[3, 3, 0, 0]} name="Laptop" />
+                  if (h === 0) return `${m} min`;
+                  if (m === 0) return `${h} hr`;
+                  return `${h} hr ${m} min`;
+                }}
+              />
 
-              <Bar dataKey="mobile" fill="hsl(200,85%,55%)" radius={[3, 3, 0, 0]} name="Mobile" />
+              <Bar dataKey="usage" fill="hsl(250,80%,65%)" radius={[3, 3, 0, 0]} name="Hours" />
 
             </BarChart>
 
@@ -252,14 +241,21 @@ export default function AnalyticsPage() {
         </ChartCard>
 
 
-        <ChartCard title="Application Usage" subtitle="Top apps by time spent" className="lg:col-span-2">
+        <ChartCard title="Application Usage" subtitle="Top apps used in last 7 days " className="lg:col-span-2">
 
           <div className="space-y-3 mt-1">
 
             {appUsage.map((app, i) => {
 
-              const pct = (app.usage_duration / maxApp) * 100;
-
+              const pct = Math.min(
+                100,
+                (app.usage_duration / safeTotal) * 100
+              );
+              
+              const percent = Math.min(
+                100,
+                Math.round((app.usage_duration / safeTotal) * 100)
+              );
               return (
 
                 <div key={i} className="flex items-center gap-3">
@@ -275,13 +271,16 @@ export default function AnalyticsPage() {
                         background: i === 0 ? 'hsl(250,80%,65%)' : i === 1 ? 'hsl(200,85%,55%)' : 'hsl(225,14%,22%)'
                       }}
                     >
-                      <span className="text-xs font-medium">{Math.round(app.usage_duration)}m</span>
+                      <span className="text-xs font-medium">
+                        {formatHoursToReadable(app.usage_duration / 60)} ({percent}%)
+                      </span>
                     </div>
 
                   </div>
 
-                  <span className="text-xs text-muted-foreground w-20">{app.app_category}</span>
-
+                  <span className="text-xs text-muted-foreground w-20">
+                    {app.active_app.includes("chrome") ? "Browser" : "App"}
+                  </span>
                 </div>
 
               );

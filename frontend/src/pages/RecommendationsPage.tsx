@@ -1,6 +1,6 @@
 import { useUsageData } from '@/hooks/useUsageData';
 import { motion } from 'framer-motion';
-import { Coffee, Moon, Repeat, Target, Smartphone, Eye, Timer, Brain } from 'lucide-react';
+import { Coffee, Moon, Repeat, Target, Smartphone, Eye, Brain, CheckCircle } from 'lucide-react';
 
 function getIcon(name: string) {
   switch (name) {
@@ -14,91 +14,107 @@ function getIcon(name: string) {
   }
 }
 
-function getPriorityStyles(priority: string) {
-  switch (priority) {
-    case 'high': return 'border-l-destructive bg-destructive/5';
-    case 'medium': return 'border-l-warning bg-warning/5';
-    default: return 'border-l-info bg-info/5';
-  }
-}
-
-function getPriorityBadge(priority: string) {
-  switch (priority) {
-    case 'high': return 'bg-destructive/15 text-destructive';
-    case 'medium': return 'bg-warning/15 text-warning';
-    default: return 'bg-info/15 text-info';
-  }
-}
-
 export default function RecommendationsPage() {
 
   const { data } = useUsageData();
-
   if (!data) return null;
 
   const recommendations = (data as any).recommendations || [];
+  const count = recommendations.length;
 
   return (
     <div className="space-y-6 animate-fade-in">
 
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Recommendations</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          AI-powered suggestions to improve your digital wellbeing
+      {/* HEADER */}
+      <div className="flex items-center justify-between">
+
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+            Recommendations
+
+            {/* 🔥 COUNT BADGE */}
+            <span className="text-xs px-2.5 py-1 rounded-full bg-primary/15 text-primary font-medium">
+              {count} suggestions
+            </span>
+
+          </h1>
+
+          <p className="text-sm text-muted-foreground mt-1">
+            Personalized actions to improve your digital habits
+          </p>
+        </div>
+
+      </div>
+
+      {/* 🧠 AI INSIGHT */}
+      <div className="p-5 rounded-2xl bg-primary/10 border border-primary/20">
+        <div className="flex items-center gap-3 mb-2">
+          <Brain className="w-5 h-5 text-primary" />
+          <p className="font-medium">AI Insight</p>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {count > 0
+            ? `We found ${count} personalized suggestions based on your recent activity.`
+            : "Keep using the app to receive personalized recommendations."}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* 💡 RECOMMENDATIONS */}
+      {count > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {recommendations.map((rec, i) => {
+          {recommendations.map((rec, i) => {
 
-          const Icon = getIcon(rec.type);
+            const Icon = getIcon(rec.type);
 
-          return (
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="glass-card p-5 rounded-xl hover:scale-[1.02] transition-all"
+              >
 
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 }}
-              className={`glass-card rounded-xl p-5 border-l-4 ${getPriorityStyles('medium')}`}
-            >
+                <div className="flex items-start gap-4">
 
-              <div className="flex items-start gap-4">
+                  {/* ICON */}
+                  <div className="p-3 rounded-xl bg-secondary">
+                    <Icon className="w-5 h-5 text-foreground" />
+                  </div>
 
-                <div className="p-2.5 rounded-lg bg-secondary shrink-0">
-                  <Icon className="w-4 h-4 text-foreground" />
-                </div>
+                  {/* TEXT */}
+                  <div className="flex-1">
 
-                <div className="flex-1 min-w-0">
+                    <p className="text-sm leading-relaxed">
+                      {rec.description}
+                    </p>
 
-                  <div className="flex items-center gap-2 mb-1.5">
-
-                    <h3 className="font-semibold text-sm">
-                      {rec.title}
-                    </h3>
-
-                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wide ${getPriorityBadge('medium')}`}>
-                      AI
-                    </span>
+                    {/* ACTION TAG */}
+                    <div className="mt-3 flex items-center gap-2 text-xs text-green-400">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Suggested action
+                    </div>
 
                   </div>
 
-                  <p className="text-xs text-muted-foreground leading-relaxed mb-3">
-                    {rec.description}
-                  </p>
-
                 </div>
 
-              </div>
+              </motion.div>
+            );
+          })}
 
-            </motion.div>
+        </div>
+      ) : (
 
-          );
+        /* 💤 EMPTY STATE */
+        <div className="glass-card p-6 rounded-xl text-center">
+          <p className="text-sm text-muted-foreground">
+            No recommendations yet. Keep using the app to get smarter suggestions.
+          </p>
+        </div>
 
-        })}
-
-      </div>
+      )}
 
     </div>
   );

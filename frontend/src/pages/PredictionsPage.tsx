@@ -1,150 +1,207 @@
 import { useUsageData } from '@/hooks/useUsageData';
-import { ChartCard } from '@/components/ChartCard';
 import { motion } from 'framer-motion';
-import { Brain, TrendingDown, AlertTriangle, CheckCircle, Info } from 'lucide-react';
+import { Brain, Sparkles, AlertTriangle, Target } from 'lucide-react';
 
-function getLevelColor(level: string) {
-  switch (level.toLowerCase()) {
-    case 'low': return 'text-success';
-    case 'medium': return 'text-warning';
-    case 'high': return 'text-destructive';
-    default: return 'text-muted-foreground';
-  }
+/* -------- HELPERS -------- */
+
+function formatHours(hours: number) {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} hr`;
+  return `${h} hr ${m} min`;
 }
 
-function getScoreColor(score: number) {
-  if (score >= 80) return 'hsl(145,65%,48%)';
-  if (score >= 60) return 'hsl(38,92%,55%)';
-  return 'hsl(0,72%,55%)';
-}
+/* -------- MAIN -------- */
 
 export default function PredictionsPage() {
   const { data } = useUsageData();
   if (!data) return null;
+
   const { fatigue, productivity } = data.predictions;
 
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">AI Predictions</h1>
-        <p className="text-sm text-muted-foreground mt-1">Machine learning insights on your digital behavior</p>
-      </div>
+  /* -------- AI PERSONALITY -------- */
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Fatigue Card */}
-        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="glass-card rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-3 rounded-xl bg-primary/15">
-              <Brain className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <h2 className="font-semibold">Fatigue Prediction</h2>
-              <p className="text-xs text-muted-foreground">ML confidence: {fatigue.confidence}%</p>
-            </div>
-          </div>
+  let personality = "Balanced User";
+  let description = "You maintain a healthy balance between focus and breaks.";
 
-          {/* Score ring */}
-          <div className="flex items-center justify-center mb-6">
-            <div className="relative w-36 h-36">
-              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="42" fill="none" stroke="hsl(225,12%,16%)" strokeWidth="6" />
-                <circle cx="50" cy="50" r="42" fill="none" stroke={getScoreColor(100 - fatigue.fatigue_score)} strokeWidth="6" strokeLinecap="round" strokeDasharray={`${fatigue.fatigue_score * 2.64} 264`} />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold">{fatigue.fatigue_score}%</span>
-                <span className={`text-xs font-medium ${getLevelColor(fatigue.fatigue_level)}`}>{fatigue.fatigue_level}</span>
-              </div>
-            </div>
-          </div>
+  if (fatigue.fatigue_score > 60) {
+    personality = "Overworked User";
+    description = "You tend to work continuously without enough breaks, leading to fatigue.";
+  } else if (productivity.productivity_score < 60) {
+    personality = "Distracted User";
+    description = "Frequent app switching and distractions are reducing your efficiency.";
+  } else if (productivity.productivity_score > 80) {
+    personality = "Highly Focused";
+    description = "You are maintaining strong focus and consistent productivity.";
+  }
 
-          {/* Factors */}
-          {fatigue.factors && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-3 font-medium">Key Contributing Factors</p>
-              <div className="space-y-2">
-                {fatigue.factors.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm p-2.5 rounded-lg bg-secondary/50">
-                    <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
-                    <span className="text-muted-foreground">{f}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </motion.div>
+  /* -------- RISK LEVEL -------- */
 
-        {/* Productivity Card */}
-        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="glass-card rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-3 rounded-xl bg-info/15">
-              <TrendingDown className="w-5 h-5 text-info" />
-            </div>
-            <div>
-              <h2 className="font-semibold">Productivity Prediction</h2>
-              <p className="text-xs text-muted-foreground">Daily productivity analysis</p>
-            </div>
-          </div>
+  let risk = "Low";
+  let riskColor = "text-green-400";
 
-          <div className="flex items-center justify-center mb-6">
-            <div className="relative w-36 h-36">
-              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="42" fill="none" stroke="hsl(225,12%,16%)" strokeWidth="6" />
-                <circle cx="50" cy="50" r="42" fill="none" stroke={getScoreColor(productivity.productivity_score)} strokeWidth="6" strokeLinecap="round" strokeDasharray={`${productivity.productivity_score * 2.64} 264`} />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold">{productivity.productivity_score}%</span>
-                <span className="text-xs text-muted-foreground">Score</span>
-              </div>
-            </div>
-          </div>
+  if (fatigue.fatigue_score > 60) {
+    risk = "High";
+    riskColor = "text-red-400";
+  } else if (productivity.productivity_score < 70) {
+    risk = "Moderate";
+    riskColor = "text-yellow-400";
+  }
 
-          <div className="p-4 rounded-xl bg-destructive/10 mb-5 flex items-start gap-3">
-            <Info className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-medium">Productivity Loss</p>
-              <p className="text-2xl font-bold mt-0.5">{productivity.productivity_loss_hours} hours/day</p>
-            </div>
-          </div>
+  /* -------- FOCUS SCORE -------- */
 
-          {productivity.breakdown && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-3 font-medium">Loss Breakdown</p>
-              <div className="space-y-2">
-                {Object.entries(productivity.breakdown).map(([key, val]) => (
-                  <div key={key} className="flex items-center justify-between text-sm p-2.5 rounded-lg bg-secondary/50">
-                    <span className="text-muted-foreground">{key}</span>
-                    <span className="font-medium">{val}h</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </motion.div>
-      </div>
-
-      {/* Summary */}
-      <ChartCard title="Prediction Summary" subtitle="AI model assessment">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl bg-secondary/50 text-center">
-            <p className="text-xs text-muted-foreground mb-1">Model Confidence</p>
-            <p className="text-2xl font-bold">{fatigue.confidence}%</p>
-            <div className="flex items-center justify-center gap-1 mt-1">
-              <CheckCircle className="w-3 h-3 text-success" />
-              <span className="text-xs text-success">Reliable</span>
-            </div>
-          </div>
-          <div className="p-4 rounded-xl bg-secondary/50 text-center">
-            <p className="text-xs text-muted-foreground mb-1">Risk Level</p>
-            <p className={`text-2xl font-bold ${getLevelColor(fatigue.fatigue_level)}`}>{fatigue.fatigue_level}</p>
-            <p className="text-xs text-muted-foreground mt-1">Based on behavior patterns</p>
-          </div>
-          <div className="p-4 rounded-xl bg-secondary/50 text-center">
-            <p className="text-xs text-muted-foreground mb-1">Daily Impact</p>
-            <p className="text-2xl font-bold">{productivity.productivity_loss_hours}h</p>
-            <p className="text-xs text-muted-foreground mt-1">Estimated time lost</p>
-          </div>
-        </div>
-      </ChartCard>
-    </div>
+  const focusScore = Math.round(
+    (productivity.productivity_score - fatigue.fatigue_score / 2)
   );
+
+  /* -------- AI EXPLANATION -------- */
+
+  const explanation = `
+Based on your recent usage patterns, your productivity is ${productivity.productivity_score}% 
+while fatigue is ${fatigue.fatigue_score}%. 
+
+This indicates that your efficiency is ${
+    productivity.productivity_score > 75 ? "good" : "affected"
+  }, but ${
+    fatigue.fatigue_score > 50 ? "fatigue is increasing" : "fatigue is under control"
+  }.
+`;
+
+/* -------- AI ACTIONABLE INSIGHTS -------- */
+
+// biggest issue
+let biggestIssue = "Balanced usage";
+let issueValue = 0;
+
+if (fatigue.fatigue_score > productivity.productivity_score) {
+  biggestIssue = "High Fatigue";
+  issueValue = fatigue.fatigue_score;
+} else {
+  biggestIssue = "Low Productivity";
+  issueValue = 100 - productivity.productivity_score;
+}
+
+// best working time (simple logic)
+const bestTime =
+  fatigue.fatigue_score < 40
+    ? "Morning (9AM - 12PM)"
+    : "Evening (6PM - 9PM)";
+
+// improvement potential
+const improvement = Math.round(
+  (100 - productivity.productivity_score) * 0.6
+);
+
+// recoverable time
+const recoverableHours = productivity.productivity_loss_hours * 0.6;
+
+return (
+  <div className="space-y-6 animate-fade-in">
+
+    {/* HEADER */}
+    <div>
+      <h1 className="text-2xl font-bold">AI Predictions</h1>
+      <p className="text-sm text-muted-foreground">
+        Simple insights from your recent activity
+      </p>
+    </div>
+
+    {/* 🧠 SIMPLE SUMMARY */}
+    <div className="glass-card p-6 rounded-2xl">
+      <p className="text-sm text-muted-foreground mb-2">Summary</p>
+
+      <p className="text-lg font-medium">
+        You are a <span className="text-primary font-semibold">{personality}</span>.
+      </p>
+
+      <p className="text-sm text-muted-foreground mt-1">
+        {description}
+      </p>
+    </div>
+
+    {/* 📊 KEY STATS */}
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <div className="glass-card p-4 rounded-xl text-center">
+        <p className="text-xs text-muted-foreground">Fatigue</p>
+        <p className="text-lg font-bold">{fatigue.fatigue_score}%</p>
+      </div>
+
+      <div className="glass-card p-4 rounded-xl text-center">
+        <p className="text-xs text-muted-foreground">Productivity</p>
+        <p className="text-lg font-bold">{productivity.productivity_score}%</p>
+      </div>
+
+      <div className="glass-card p-4 rounded-xl text-center">
+        <p className="text-xs text-muted-foreground">Focus</p>
+        <p className="text-lg font-bold">{focusScore}%</p>
+      </div>
+
+      <div className="glass-card p-4 rounded-xl text-center">
+        <p className="text-xs text-muted-foreground">Risk</p>
+        <p className={`text-lg font-bold ${riskColor}`}>{risk}</p>
+      </div>
+
+    </div>
+
+    {/* ⚠️ MAIN ISSUE */}
+    <div className="glass-card p-6 rounded-2xl">
+      <p className="text-sm text-muted-foreground mb-1">Main Issue</p>
+
+      <p className="text-lg font-semibold text-red-400">
+        {biggestIssue}
+      </p>
+
+      <p className="text-xs text-muted-foreground mt-2">
+        This is affecting your performance the most.
+      </p>
+    </div>
+
+    {/* 💡 WHAT YOU SHOULD DO */}
+    <div className="glass-card p-6 rounded-2xl">
+      <p className="text-sm text-muted-foreground mb-3">What you can do</p>
+
+      <div className="space-y-2 text-sm">
+        <div>• Try to work during <span className="text-green-400 font-medium">{bestTime}</span></div>
+        <div>• You can improve by <span className="text-yellow-400 font-medium">{improvement}%</span></div>
+      </div>
+    </div>
+
+    {/* 🤖 SIMPLE EXPLANATION */}
+    <div className="glass-card p-6 rounded-2xl">
+      <p className="text-sm text-muted-foreground mb-2">Explanation</p>
+
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Your productivity is {productivity.productivity_score}% while fatigue is {fatigue.fatigue_score}%.
+        This means your performance is {productivity.productivity_score > 75 ? "good" : "affected"}.
+      </p>
+    </div>
+
+{/* 🔥 IMPACT HIGHLIGHT (BETTER DESIGN) */}
+
+<div className="glass-card p-6 rounded-2xl">
+
+  <p className="text-sm text-red-400 mb-2 font-medium">
+     Impact on your day
+  </p>
+
+  <p className="text-xl font-semibold">
+    You are losing <span className="text-red-400 font-bold">
+      {formatHours(productivity.productivity_loss_hours)}
+    </span> every day
+  </p>
+
+  <p className="text-sm text-muted-foreground mt-2">
+    If you improve your habits, you can recover up to{" "}
+    <span className="text-green-400 font-medium">
+      {formatHours(recoverableHours)}
+    </span>
+  </p>
+
+</div>
+
+  </div>
+);
 }

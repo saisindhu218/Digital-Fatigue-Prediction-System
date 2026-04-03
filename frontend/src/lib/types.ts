@@ -14,7 +14,6 @@ export interface LaptopUsage{
   active_app:string;
   app_category:string;
   usage_duration:number;
-
   session_length_minutes?:number;
   idle_time_seconds?:number;
   keystrokes?:number;
@@ -22,12 +21,14 @@ export interface LaptopUsage{
   mouse_moves?:number;
   app_switches?:number;
   time_of_day?:string;
+  timestamp: string; 
 }
 
 export interface MobileUsage{
   app_name:string;
   category?:string;
   screen_time:number;
+  timestamp: string; 
   notifications_received:number;
 }
 

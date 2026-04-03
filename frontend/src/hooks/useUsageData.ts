@@ -7,7 +7,7 @@ export function useUsageData() {
 
   const { user } = useAuth();
 
-  return useQuery<UsageResponse>({
+  return useQuery<any>({
     queryKey: ["usage", user?.id],
     enabled: !!user?.id,
 
@@ -18,11 +18,13 @@ export function useUsageData() {
 
       const usage = await api.getUsageData(user.id);
       const trends = await api.getTrends(user.id);
+      const analytics = await api.getAnalytics(user.id); // 🔥 NEW
 
       // attach trends safely
       return {
         ...usage,
-        trends
+        trends,
+        analytics
       } as UsageResponse;
     },
 

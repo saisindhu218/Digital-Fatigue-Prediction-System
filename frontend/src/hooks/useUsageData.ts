@@ -34,3 +34,22 @@ export function useUsageData() {
     refetchOnWindowFocus: true
   });
 }
+
+export function useTrends(days: number = 7) {
+  const { user } = useAuth();
+
+  return useQuery<any>({
+    queryKey: ["trends", user?.id, days],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      if (!user?.id) {
+        throw new Error("User not available");
+      }
+      return api.getTrends(user.id, days);
+    },
+    staleTime: 0,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true
+  });
+}

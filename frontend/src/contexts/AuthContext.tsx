@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { User } from "@/lib/types";
 import { api } from "@/lib/api";
 
@@ -24,7 +24,7 @@ function safeParse(value: string | null) {
   }
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -48,16 +48,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const token = res.access_token;
 
-    let userData: User | null = res.user ?? null;
-
-    // If backend didn't send user object, decode token
-    if (!userData && token) {
+    // Decode token to get user data since API doesn't return user object
+    let userData: User | null = null;
+    if (token) {
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
         userData = {
           id: payload.user_id,
           email: payload.sub,
-          full_name: payload.sub,
+          name: payload.sub.split('@')[0],
         } as User;
       } catch {
         userData = null;
@@ -80,15 +79,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const token = res.access_token;
 
-    let userData: User | null = res.user ?? null;
-
-    if (!userData && token) {
+    // Decode token to get user data since API doesn't return user object
+    let userData: User | null = null;
+    if (token) {
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
         userData = {
           id: payload.user_id,
           email: payload.sub,
-          full_name: name,
+          name: name,
         } as User;
       } catch {
         userData = null;
@@ -113,18 +112,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const contextValue = useMemo(() => ({
+    user,
+    token,
+    isAuthenticated: !!token,
+    isLoading,
+    login,
+    register,
+    logout,
+  }), [user, token, isLoading, login, register, logout]);
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        isAuthenticated: !!token,
-        isLoading,
-        login,
-        register,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

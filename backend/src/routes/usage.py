@@ -152,23 +152,8 @@ async def receive_mobile_usage(data: dict):
 
 async def run_prediction(user_id: str):
 
-    now = datetime.utcnow()
-
-    # find last prediction time
-    last_prediction = await db.db.predictions.find_one(
-        {"user_id": user_id},
-        sort=[("timestamp", -1)]
-    )
-
-#    if last_prediction:
-#        last_time = last_prediction["timestamp"]
- #   else:
-  #      last_time = now - timedelta(minutes=10)
-
-    # 👉 take ONLY data after last prediction
-   # cutoff = last_time
-
-    cutoff = datetime.utcnow() - timedelta(minutes=10)
+    # Use data from the last 24 hours for predictions
+    cutoff = datetime.utcnow() - timedelta(days=1)
 
     laptop_data = await db.db.usage_data.find({
         "user_id": user_id,
@@ -244,14 +229,39 @@ async def get_recent_usage(user_id: str, hours: int = 24):
     
     if not laptop_data and not mobile_data:
         print("⚠️ No data for prediction")
-        return
+
+        return {
+            "summary": {
+                "total_screen_time": 0,
+                "total_sessions": 0,
+                "avg_session_length": 0,
+                "most_used_app": "None",
+                "focus_score": 0,
+                "break_frequency": 0,
+                "peak_hours": "None"
+            },
+            "predictions": {
+                "fatigue": {
+                    "fatigue_level": "Low",
+                    "fatigue_score": 0,
+                    "confidence": 0
+                },
+                "productivity": {
+                    "productivity_score": 0,
+                    "productivity_loss_hours": 0,
+                    "breakdown": {}
+                }
+            },
+            "recommendations": [],
+            "laptop_usage": [],
+            "mobile_usage": []
+        }
     
     # ✅ FIX
     laptop = laptop_data
     mobile = mobile_data
     # -------- SUMMARY --------
 
-    
 
     total_minutes = sum(
         (u.get("usage_duration", 0) or 0)
@@ -383,7 +393,10 @@ async def get_recent_usage(user_id: str, hours: int = 24):
 @router.get("/user/{user_id}/trends")
 async def get_trends(user_id: str, days: int = 7):
 
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    # 🔥 Use IST timezone to match frontend expectations
+    ist_now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    cutoff_ist = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days-1)
+    cutoff = cutoff_ist.astimezone(pytz.utc)
 
     preds = await db.db.predictions.find({
         "user_id": user_id,
@@ -399,14 +412,8 @@ async def get_trends(user_id: str, days: int = 7):
             "productivityTrend": []
         }
 
-    # check how many unique days exist
-    unique_days = list(set(
-        p["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist).strftime("%Y-%m-%d")
-        for p in preds
-    ))
-
-    # -------- CASE 1: ONLY ONE DAY (TODAY) --------
-    if len(unique_days) == 1:
+    # -------- CASE 1: HOURLY DATA FOR TODAY (days=1) --------
+    if days == 1:
 
         time_groups = {}
 
@@ -421,7 +428,8 @@ async def get_trends(user_id: str, days: int = 7):
             time_groups[time_label]["productivity"].append(p.get("productivity_score", 0))
 
 
-        for time_label, values in time_groups.items():
+        for time_label in sorted(time_groups.keys()):
+            values = time_groups[time_label]
 
             fatigue_trend.append({
                 "day": time_label,
@@ -432,7 +440,7 @@ async def get_trends(user_id: str, days: int = 7):
                 "day": time_label,
                 "score": round(sum(values["productivity"]) / len(values["productivity"]), 2)
             })
-    # -------- CASE 2: MULTIPLE DAYS --------
+    # -------- CASE 2: DAILY DATA FOR MULTIPLE DAYS --------
     else:
 
         daily = {}
@@ -447,31 +455,29 @@ async def get_trends(user_id: str, days: int = 7):
             daily[day]["fatigue"].append(p.get("fatigue_score", 0))
             daily[day]["productivity"].append(p.get("productivity_score", 0))
 
-        today = datetime.now(ist).date()   # ✅ ONLY DATE (important)
-
-       # order = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
-        # generate all last N days
+        # generate all last N days (using IST)
         all_days = [
-            (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
+            (ist_now - timedelta(days=i)).strftime("%Y-%m-%d")
              for i in range(days-1, -1, -1)
         ]
 
         for day in all_days:
             if day in daily:
                 values = daily[day]
+                fatigue_score = round(sum(values["fatigue"]) / len(values["fatigue"]), 2)
+                productivity_score = round(sum(values["productivity"]) / len(values["productivity"]), 2)
 
                 fatigue_trend.append({
                     "day": day,
-                    "score": values["fatigue"][-1] #round(sum(values["fatigue"]) / len(values["fatigue"]), 2)
+                    "score": fatigue_score
                 })
 
                 productivity_trend.append({
                     "day": day,
-                    "score": values["productivity"][-1] # round(sum(values["productivity"]) / len(values["productivity"]), 2)
+                    "score": productivity_score
                 })
-                  
             else:
-            # 🔥 fill missing days
+                # 🔥 fill missing days
                 fatigue_trend.append({
                     "day": day,
                     "score": 0
@@ -490,45 +496,43 @@ async def get_trends(user_id: str, days: int = 7):
 @router.get("/user/{user_id}/analytics")
 async def get_analytics(user_id: str):
     
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    # 🔥 Use IST for cutoff to ensure we get all data from last 7 calendar days
+    ist_now = datetime.now(ist)
+    cutoff_ist = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+    cutoff_utc = cutoff_ist.astimezone(pytz.utc)
 
     records = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "laptop",
-        "timestamp": {"$gte": cutoff}
+        "timestamp": {"$gte": cutoff_utc}
     }).to_list(2000)
     
     if not records:
         return {}
 
-    # -------- DYNAMIC RANGE --------
-    days = list(set(r["timestamp"].strftime("%Y-%m-%d") for r in records))
-    total_days = len(days)
+    # -------- FILTER & PREPARE --------
+    filtered = records  # Use all records from cutoff
 
-    if total_days >= 30:
-        days_to_use = 30
-    elif total_days >= 7:
-        days_to_use = 7
-    else:
-        days_to_use = total_days
-
-    cutoff = datetime.utcnow() - timedelta(days=days_to_use)
-
-    filtered = [r for r in records if r["timestamp"] >= cutoff]
-
-    # -------- AVG DAILY --------
+    # -------- AVG DAILY (Include all 7 days, even zeros) --------
     from collections import defaultdict
 
     daily_usage = defaultdict(int)
+    
+    # Initialize all 7 days with 0
+    for i in range(7):
+        day_date = (ist_now - timedelta(days=i)).date()
+        daily_usage[day_date] = 0
 
     for r in filtered:
-        d = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist).strftime("%d %b")
+        d = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist).date()
         daily_usage[d] += r.get("usage_duration", 0)
 
-    daily_usage_data = [
-        {"date": d, "usage": v}
-        for d, v in sorted(daily_usage.items())
-    ]
+    # Sort by date (oldest to newest)
+    daily_usage_data = []
+    for i in range(6, -1, -1):  # Last 7 days in order
+        day_date = (ist_now - timedelta(days=i)).date()
+        day_str = day_date.strftime("%d %b")
+        daily_usage_data.append({"date": day_str, "usage": daily_usage.get(day_date, 0)})
     # -------- MOST USED APP --------
     app_map = {}
 
@@ -569,16 +573,16 @@ async def get_analytics(user_id: str):
 
     # ✅ CORRECT VERSION (use your own variable)
     total_usage = sum([d["usage"] for d in daily_usage_data])
-    days = len(daily_usage_data) if daily_usage_data else 1
-    avg_daily = total_usage / days
+    avg_daily = total_usage / 7  # Always average over 7 days
     
     return {
         
-        "range": f"{days_to_use} days",
+        "range": "7 days",
         "avg_daily_usage": round(avg_daily,2),
         "focus_ratio": focus_ratio,
         "most_used_app": most_used_app,
         "hourly": hourly_data,
         "weekly": weekly_data,
-        "daily": daily_usage_data
+        "daily": daily_usage_data,
+        "laptop_usage": filtered  # 🔥 Include raw 7-day data for AnalyticsPage
     }

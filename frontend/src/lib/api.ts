@@ -71,8 +71,8 @@ export const api = {
     request<UsageResponse>(`/usage/user/${userId}/recent`),
 
   // NEW: TREND DATA
-  getTrends: (userId: string) =>
-    request(`/usage/user/${userId}/trends`),
+  getTrends: (userId: string, days: number = 7) =>
+    request(`/usage/user/${userId}/trends?days=${days}`),
 
   getAnalytics: (userId: string) =>
   request(`/usage/user/${userId}/analytics`),

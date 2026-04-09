@@ -41,7 +41,10 @@ async def get_active_user():
 # ---------------- GENERATE PAIRING CODE ----------------
 
 @router.post("/generate")
-async def generate_pairing_code():
+async def generate_pairing_code(user_id: str | None = None):
+
+    if user_id:
+        ACTIVE_USER["user_id"] = user_id
 
     if not ACTIVE_USER["user_id"]:
         raise HTTPException(status_code=400, detail="Active user not set")
@@ -74,7 +77,10 @@ async def generate_qr_code(device_data: DeviceCreate):
 
         await db.db.devices.update_one(
             {"_id": existing_device["_id"]},
-            {"$set": {"last_active": datetime.utcnow()}}
+            {"$set": {
+                "last_active": datetime.utcnow(),
+                "device_name": device_data.device_name  # Update name if changed
+            }}
         )
 
         device_id = existing_device["_id"]
@@ -167,47 +173,51 @@ async def verify_pairing(token: str, scanning_device_id: str):
 # ---------------- DEVICE STATUS (FIX FOR YOUR ERROR) ----------------
 
 @router.get("/status")
-async def get_device_status():
+async def get_device_status(user_id: str | None = None):
 
-    user_id = ACTIVE_USER["user_id"]
+    if not user_id:
+        user_id = ACTIVE_USER["user_id"]
 
     if not user_id:
         return {
-            "laptop": False,
-            "mobile": False,
+            "devices": [],
             "last_synced": None,
             "data_points": 0
         }
 
-    # get latest usage record
+    # Get all devices for this user
+    devices_cursor = db.db.devices.find({"user_id": user_id})
+    devices = await devices_cursor.to_list(length=None)
+
+    # Get latest usage record for last_synced
     latest_usage = await db.db.usage_data.find_one(
         {"user_id": user_id},
         sort=[("timestamp", -1)]
     )
 
-    if not latest_usage:
-        return {
-            "laptop": False,
-            "mobile": False,
-            "last_synced": None,
-            "data_points": 0
-        }
+    # Count total data points
+    total_data_points = await db.db.usage_data.count_documents({"user_id": user_id})
 
-    # detect laptop activity
-    laptop_count = await db.db.usage_data.count_documents({
-        "user_id": user_id,
-        "data_type": "laptop"
-    })
+    device_status = []
+    for device in devices:
+        # Check if device has recent activity (within last 24 hours)
+        recent_activity = await db.db.usage_data.find_one({
+            "user_id": user_id,
+            "device_id": device.get("device_id"),
+            "timestamp": {"$gte": datetime.utcnow() - timedelta(hours=24)}
+        })
 
-    # detect mobile activity
-    mobile_count = await db.db.usage_data.count_documents({
-        "user_id": user_id,
-        "data_type": "mobile"
-    })
+        device_status.append({
+            "device_id": device.get("device_id"),
+            "device_name": device.get("device_name", f"{device.get('device_type', 'Unknown').title()} Device"),
+            "device_type": device.get("device_type", "unknown"),
+            "status": "connected" if recent_activity else "disconnected",
+            "last_active": device.get("last_active").isoformat() if device.get("last_active") else None,
+            "paired_at": device.get("paired_at").isoformat() if device.get("paired_at") else None
+        })
 
     return {
-        "laptop": laptop_count > 0,
-        "mobile": mobile_count > 0,
-        "last_synced": latest_usage["timestamp"].isoformat(),
-        "data_points": laptop_count + mobile_count
+        "devices": device_status,
+        "last_synced": latest_usage["timestamp"].isoformat() if latest_usage else None,
+        "data_points": total_data_points
     }

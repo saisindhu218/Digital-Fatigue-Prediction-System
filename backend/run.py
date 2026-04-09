@@ -76,9 +76,9 @@ def load_environment():
 # START ACTIVITY LOGGER
 # ==============================
 def start_activity_logger():
-
+    
     logger_path = SRC_DIR / "laptop_collector" / "activity_logger.py"
-
+    
     if not logger_path.exists():
         print("WARNING activity_logger.py not found")
         return
@@ -128,6 +128,9 @@ def main():
 
     start_activity_logger()
 
+# ✅ CORRECT PLACE
+    free_port(8000)
+
     print("\nStarting FastAPI server...")
     print("API Docs: http://localhost:8000/docs")
     print("Health:   http://localhost:8000/health")
@@ -144,6 +147,35 @@ def main():
     except Exception as e:
         print("Server failed:", e)
 
+# ==============================
+# AUTO FREE PORT (PERMANENT FIX)
+# ==============================
+def free_port(port=8000):
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            f'netstat -ano | findstr :{port}',
+            capture_output=True,
+            text=True,
+            shell=True
+        )
+
+        lines = result.stdout.splitlines()
+
+        for line in lines:
+            if "LISTENING" in line:
+                pid = line.strip().split()[-1]
+
+                print(f"🔄 Killing existing process on port {port} (PID: {pid})")
+
+                subprocess.run(
+                    f"taskkill /PID {pid} /F",
+                    shell=True
+                )
+
+    except Exception as e:
+        print("⚠️ Port cleanup failed:", e)
 
 if __name__ == "__main__":
     main()

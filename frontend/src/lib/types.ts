@@ -85,3 +85,17 @@ export interface DeviceInfo{
   last_synced:string;
   data_points:number;
 }
+
+export interface Analytics {
+  daily: { date: string; usage: number }[];
+  weekly: { day: string; usage: number }[];
+}
+
+export interface UsageResponse {
+  summary: Summary;
+  predictions: Predictions;
+  laptop_usage: LaptopUsage[];
+  mobile_usage: MobileUsage[];
+  trends?: Trends;
+  analytics?: Analytics;  // add this
+}

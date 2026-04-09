@@ -296,14 +296,17 @@ def main():
 
     # ---------------- REGISTER DEVICE IN BACKEND ----------------
 
-    try:
+    import socket
+    hostname = socket.gethostname()
+    device_name = hostname or "User Laptop"
 
+    try:
         requests.post(
             f"{API_BASE}/api/v1/pairing/generate-qr",
             json={
                 "device_id": device,
                 "device_type": "laptop",
-                "device_name": "User Laptop",
+                "device_name": device_name,
                 "user_id": user
             },
             timeout=5

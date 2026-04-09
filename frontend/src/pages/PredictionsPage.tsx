@@ -1,6 +1,4 @@
 import { useUsageData } from '@/hooks/useUsageData';
-import { motion } from 'framer-motion';
-import { Brain, Sparkles, AlertTriangle, Target } from 'lucide-react';
 
 /* -------- HELPERS -------- */
 
@@ -96,6 +94,24 @@ const improvement = Math.round(
 
 // recoverable time
 const recoverableHours = productivity.productivity_loss_hours * 0.6;
+const fatigueFactors = fatigue.factors ?? [];
+const suggestedActions = fatigue.fatigue_score > 70
+  ? [
+      'Take a short break after each focused session.',
+      'Limit app switching while working.',
+      'Do a quick stretch or walk to refresh your focus.',
+    ]
+  : productivity.productivity_score < 60
+  ? [
+      'Use time blocks of 25 minutes with short breaks.',
+      'Turn off non-essential notifications.',
+      'Focus on one task at a time.',
+    ]
+  : [
+      'Keep the current pace with periodic breaks.',
+      'Stay hydrated and avoid multitasking.',
+      'Review progress at regular intervals.',
+    ];
 
 return (
   <div className="space-y-6 animate-fade-in">
@@ -201,6 +217,37 @@ return (
   </p>
 
 </div>
+
+    {/* 📌 PREDICTION DRIVERS */}
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="glass-card p-6 rounded-2xl">
+        <p className="text-sm text-muted-foreground mb-2">Prediction Drivers</p>
+        {fatigueFactors.length > 0 ? (
+          <ul className="space-y-2 text-sm">
+            {fatigueFactors.map((factor, index) => (
+              <li key={index} className="flex items-start gap-2">
+                <span className="mt-1 h-2.5 w-2.5 rounded-full bg-violet-500" />
+                <span>{factor}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No fatigue drivers were detected.</p>
+        )}
+      </div>
+
+      <div className="glass-card p-6 rounded-2xl">
+        <p className="text-sm text-muted-foreground mb-2">Smart Action Plan</p>
+        <ul className="space-y-3 text-sm">
+          {suggestedActions.map((action, index) => (
+            <li key={index} className="flex items-start gap-2">
+              <span className="mt-1 h-2.5 w-2.5 rounded-full bg-green-400" />
+              <span>{action}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
 
   </div>
 );

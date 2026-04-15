@@ -68,24 +68,32 @@ async def generate_pairing_code(user_id: str | None = None):
 @router.post("/generate-qr", response_model=QRToken)
 async def generate_qr_code(device_data: DeviceCreate):
 
-    existing_device = await db.db.devices.find_one({
-        "device_id": device_data.device_id,
-        "user_id": device_data.user_id
-    })
+    is_dashboard_placeholder = (
+        (device_data.device_name or "") == "FatigueAI Dashboard" and
+        (device_data.device_id or "").startswith("portal_")
+    )
+
+    existing_device = None
+    device_id = None
+
+    if not is_dashboard_placeholder:
+        existing_device = await db.db.devices.find_one({
+            "device_id": device_data.device_id,
+            "user_id": device_data.user_id
+        })
 
     if existing_device:
 
         await db.db.devices.update_one(
             {"_id": existing_device["_id"]},
             {"$set": {
-                "last_active": datetime.utcnow(),
                 "device_name": device_data.device_name  # Update name if changed
             }}
         )
 
         device_id = existing_device["_id"]
 
-    else:
+    elif not is_dashboard_placeholder:
 
         device_id = str(uuid.uuid4())
 
@@ -189,6 +197,66 @@ async def get_device_status(user_id: str | None = None):
     devices_cursor = db.db.devices.find({"user_id": user_id})
     devices = await devices_cursor.to_list(length=None)
 
+    # Fallback: infer connected devices from recent usage if device docs are missing
+    recent_usage_cursor = db.db.usage_data.find({
+        "user_id": user_id,
+        "timestamp": {"$gte": datetime.utcnow() - timedelta(hours=24)}
+    })
+    recent_usage = await recent_usage_cursor.to_list(length=None)
+
+    async def get_first_seen_timestamp(device_id: str | None = None, data_type: str | None = None):
+        query = {"user_id": user_id}
+        if device_id:
+            query["device_id"] = device_id
+        if data_type:
+            query["data_type"] = data_type
+
+        first_usage = await db.db.usage_data.find_one(query, sort=[("timestamp", 1)])
+
+        if first_usage and first_usage.get("timestamp"):
+            return first_usage.get("timestamp").isoformat()
+
+        return None
+
+    async def get_latest_seen_timestamp(device_id: str | None = None, data_type: str | None = None):
+        query = {"user_id": user_id}
+        if device_id:
+            query["device_id"] = device_id
+        if data_type:
+            query["data_type"] = data_type
+
+        latest_usage_row = await db.db.usage_data.find_one(query, sort=[("timestamp", -1)])
+
+        if latest_usage_row and latest_usage_row.get("timestamp"):
+            return latest_usage_row.get("timestamp").isoformat()
+
+        return None
+
+    if not devices and recent_usage:
+        inferred_devices = {}
+
+        for usage in recent_usage:
+            device_id = usage.get("device_id")
+            if not device_id:
+                continue
+
+            fallback_paired_at = await get_first_seen_timestamp(device_id)
+
+            inferred_devices.setdefault(device_id, {
+                "device_id": device_id,
+                "device_name": device_id,
+                "device_type": usage.get("data_type", "unknown"),
+                "status": "connected",
+                "last_active": usage.get("timestamp").isoformat() if usage.get("timestamp") else None,
+                "paired_at": fallback_paired_at,
+            })
+
+        return {
+            "devices": list(inferred_devices.values()),
+            "last_synced": recent_usage[0]["timestamp"].isoformat() if recent_usage and recent_usage[0].get("timestamp") else None,
+            "data_points": len(recent_usage)
+        }
+
     # Get latest usage record for last_synced
     latest_usage = await db.db.usage_data.find_one(
         {"user_id": user_id},
@@ -198,23 +266,89 @@ async def get_device_status(user_id: str | None = None):
     # Count total data points
     total_data_points = await db.db.usage_data.count_documents({"user_id": user_id})
 
+    recent_cutoff = datetime.utcnow() - timedelta(hours=24)
+
     device_status = []
     for device in devices:
+        if (
+            (device.get("device_name") or "") == "FatigueAI Dashboard" and
+            (device.get("device_id") or "").startswith("portal_")
+        ):
+            continue
+
         # Check if device has recent activity (within last 24 hours)
         recent_activity = await db.db.usage_data.find_one({
             "user_id": user_id,
             "device_id": device.get("device_id"),
-            "timestamp": {"$gte": datetime.utcnow() - timedelta(hours=24)}
+            "timestamp": {"$gte": recent_cutoff}
         })
+
+        # Fallback: if device_id mapping drifted, try matching by device type.
+        if not recent_activity and device.get("device_type"):
+            recent_activity = await db.db.usage_data.find_one({
+                "user_id": user_id,
+                "data_type": device.get("device_type"),
+                "timestamp": {"$gte": recent_cutoff}
+            })
+
+        # Final fallback: trust device heartbeat if last_active itself is recent.
+        is_recent_by_last_active = False
+        if device.get("last_active"):
+            is_recent_by_last_active = device.get("last_active") >= recent_cutoff
+
+        fallback_paired_at = None
+        if device.get("device_id"):
+            fallback_paired_at = await get_first_seen_timestamp(device_id=device.get("device_id"))
+        if not fallback_paired_at and device.get("device_type"):
+            fallback_paired_at = await get_first_seen_timestamp(data_type=device.get("device_type"))
+
+        resolved_name = device.get("device_name")
+        if (not resolved_name or resolved_name == "FatigueAI Dashboard") and recent_activity and recent_activity.get("device_id"):
+            resolved_name = recent_activity.get("device_id")
+        if not resolved_name:
+            resolved_name = f"{device.get('device_type', 'Unknown').title()} Device"
+
+        resolved_last_active = None
+        if device.get("device_id"):
+            resolved_last_active = await get_latest_seen_timestamp(device_id=device.get("device_id"))
+        if not resolved_last_active and device.get("device_type"):
+            resolved_last_active = await get_latest_seen_timestamp(data_type=device.get("device_type"))
+        if not resolved_last_active and device.get("last_active"):
+            resolved_last_active = device.get("last_active").isoformat()
 
         device_status.append({
             "device_id": device.get("device_id"),
-            "device_name": device.get("device_name", f"{device.get('device_type', 'Unknown').title()} Device"),
+            "device_name": resolved_name,
             "device_type": device.get("device_type", "unknown"),
-            "status": "connected" if recent_activity else "disconnected",
-            "last_active": device.get("last_active").isoformat() if device.get("last_active") else None,
-            "paired_at": device.get("paired_at").isoformat() if device.get("paired_at") else None
+            "status": "connected" if (recent_activity or is_recent_by_last_active) else "disconnected",
+            "last_active": resolved_last_active,
+            "paired_at": (
+                device.get("paired_at").isoformat()
+                if device.get("paired_at")
+                else fallback_paired_at
+            )
         })
+
+    if not device_status and recent_usage:
+        inferred_devices = {}
+
+        for usage in recent_usage:
+            device_id = usage.get("device_id")
+            if not device_id:
+                continue
+
+            fallback_paired_at = await get_first_seen_timestamp(device_id)
+
+            inferred_devices.setdefault(device_id, {
+                "device_id": device_id,
+                "device_name": device_id,
+                "device_type": usage.get("data_type", "unknown"),
+                "status": "connected",
+                "last_active": usage.get("timestamp").isoformat() if usage.get("timestamp") else None,
+                "paired_at": fallback_paired_at,
+            })
+
+        device_status = list(inferred_devices.values())
 
     return {
         "devices": device_status,

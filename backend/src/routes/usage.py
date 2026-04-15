@@ -178,6 +178,12 @@ async def run_prediction(user_id: str):
     productivity_loss = ml_service.predict_productivity_loss(features)
 
     productivity_score = max(0, 100 - productivity_loss * 5)
+    productivity_confidence = ml_service.estimate_productivity_confidence(
+        len(laptop_data) + len(mobile_data),
+        features.get("productive_ratio", 0.5),
+        features.get("focus_score", 50),
+        productivity_loss,
+    )
 
     prediction_record = {
         "_id": str(uuid.uuid4()),
@@ -187,7 +193,8 @@ async def run_prediction(user_id: str):
         "fatigue_score": fatigue_result["score"],
         "confidence": fatigue_result["confidence"],
         "productivity_loss_hours": productivity_loss,
-        "productivity_score": productivity_score
+        "productivity_score": productivity_score,
+        "productivity_confidence": productivity_confidence
     }
 
     try:
@@ -249,6 +256,7 @@ async def get_recent_usage(user_id: str, hours: int = 24):
                 "productivity": {
                     "productivity_score": 0,
                     "productivity_loss_hours": 0,
+                    "productivity_confidence": 0,
                     "breakdown": {}
                 }
             },
@@ -353,21 +361,30 @@ async def get_recent_usage(user_id: str, hours: int = 24):
         context_hours = round(total_switches / 60, 2) 
         distraction_hours = round(non_productive / 60, 2)
 
+        features = feature_extractor.extract_features_from_live_data(
+            laptop,
+            mobile,
+            user_id
+        )
+
         productivity = {
             "productivity_score": p.get("productivity_score"),
             "productivity_loss_hours": p.get("productivity_loss_hours"),
+            "confidence": p.get(
+                "productivity_confidence",
+                ml_service.estimate_productivity_confidence(
+                    len(laptop),
+                    features.get("productive_ratio", 0.5),
+                    features.get("focus_score", 50),
+                    p.get("productivity_loss_hours", 0),
+                ),
+            ),
             "breakdown": {
                 "Fatigue": fatigue_hours,
                 "Context Switching": context_hours,
                 "Distractions": distraction_hours
             }
         }
-
-        features = feature_extractor.extract_features_from_live_data(
-            laptop,
-            mobile,
-            user_id
-        )
 
         recommendations = ml_service.generate_recommendations(
             features,

@@ -1,6 +1,5 @@
-import { Brain, LayoutDashboard, BarChart3, Sparkles, Lightbulb, Smartphone, LogOut } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Sparkles, Lightbulb, Smartphone, LogOut } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
-import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarMenu,
@@ -18,18 +17,18 @@ const navItems = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
-  const location = useLocation();
   const { logout, user } = useAuth();
 
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
         {/* Logo */}
-        <div className="p-4 flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-primary/15 shrink-0">
-            <Brain className="w-4 h-4 text-primary" />
-          </div>
-          {!collapsed && <span className="font-bold text-sm tracking-tight">FatigueAI</span>}
+        <div className="p-4 flex items-center">
+          {!collapsed && (
+            <span className="inline-flex items-center rounded-md bg-primary/10 px-2.5 py-1 text-sm font-semibold tracking-tight text-primary ring-1 ring-primary/15">
+              FatigueAI
+            </span>
+          )}
         </div>
 
         <SidebarGroup>

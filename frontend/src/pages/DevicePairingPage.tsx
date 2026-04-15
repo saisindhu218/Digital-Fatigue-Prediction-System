@@ -2,16 +2,40 @@ import { motion } from 'framer-motion';
 import { Smartphone, Laptop, Wifi, WifiOff, QrCode, Copy, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useEffect, useState } from 'react';
+import { useUsageData } from '@/hooks/useUsageData';
 
 const API_BASE = "http://localhost:8000/api/v1";
+
+function formatISTDateTime(value?: string | null): string {
+  if (!value) return 'Never';
+
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value);
+  const normalizedValue = hasTimezone ? value : `${value}Z`;
+  const date = new Date(normalizedValue);
+  if (Number.isNaN(date.getTime())) return 'Invalid date';
+
+  return date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+}
 
 export default function DevicePairingPage() {
 
   const [pairingCode,setPairingCode] = useState<string>("");
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
+  const [qrExpiresAt, setQrExpiresAt] = useState<string | null>(null);
   const [copied,setCopied] = useState(false);
   const [status,setStatus] = useState<any>(null);
   const [loading,setLoading] = useState(true);
   const [error,setError] = useState<string | null>(null);
+  const usageQuery = useUsageData();
 
   const userId = localStorage.getItem("user_id");
 
@@ -34,25 +58,51 @@ export default function DevicePairingPage() {
       const res = await fetch(`${API_BASE}/pairing/status?user_id=${userId}`);
       const data = await res.json();
       setStatus(data);
+      return data;
     }catch(e){
       console.error(e);
       setError("Unable to load device status. Please check your network.");
+      return null;
     }
   };
 
   /* ---------------- GENERATE PAIR CODE ---------------- */
 
-  const generateCode = async () => {
+  const generateCode = async (statusData?: any) => {
     if (!userId) {
       throw new Error("Missing user session");
     }
 
+    // Short manual code flow
     const res = await fetch(`${API_BASE}/pairing/generate?user_id=${userId}`,{
       method:"POST"
     });
 
     const data = await res.json();
     setPairingCode(data.pairing_code);
+
+    // QR scan flow
+    const sourceDevice = (statusData?.devices || []).find((d: any) => d.device_type === 'laptop')
+      || (statusData?.devices || [])[0];
+
+    const qrRes = await fetch(`${API_BASE}/pairing/generate-qr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: sourceDevice?.device_id || `portal_${userId}`,
+        device_type: sourceDevice?.device_type || 'laptop',
+        device_name: sourceDevice?.device_name || 'FatigueAI Dashboard',
+        user_id: userId,
+      }),
+    });
+
+    if (!qrRes.ok) {
+      throw new Error('Failed to generate QR code');
+    }
+
+    const qrData = await qrRes.json();
+    setQrCodeUrl(qrData.qr_code_url || '');
+    setQrExpiresAt(qrData.expires_at || null);
   };
 
   /* ---------------- COPY CODE ---------------- */
@@ -81,7 +131,8 @@ export default function DevicePairingPage() {
 
       try {
         await saveActiveUser();
-        await Promise.all([loadStatus(), generateCode()]);
+        const statusData = await loadStatus();
+        await generateCode(statusData);
       } catch (e) {
         console.error(e);
         setError("Could not initialize device pairing. Please refresh the page.");
@@ -132,6 +183,29 @@ export default function DevicePairingPage() {
   /* ---------------- DEVICE LIST ---------------- */
 
   const devices = status?.devices || [];
+  const fallbackLaptopUsage = usageQuery.data?.laptop_usage || [];
+  const inferredLaptop = devices.length === 0 ? fallbackLaptopUsage[0] : null;
+
+  const laptopTimestamps = fallbackLaptopUsage
+    .map((usage: any) => usage?.timestamp)
+    .filter((ts: string | undefined) => !!ts)
+    .sort((a: string, b: string) => new Date(a).getTime() - new Date(b).getTime());
+
+  const inferredLaptopPairedAt = laptopTimestamps.length ? laptopTimestamps[0] : null;
+  const inferredLaptopLastActive = laptopTimestamps.length ? laptopTimestamps[laptopTimestamps.length - 1] : null;
+
+  let displayDevices = devices;
+
+  if (displayDevices.length === 0 && inferredLaptop) {
+    displayDevices = [{
+      device_id: inferredLaptop.device_id || 'current-laptop',
+      device_name: 'Laptop Device',
+      device_type: 'laptop',
+      status: 'connected',
+      last_active: inferredLaptopLastActive || inferredLaptop.timestamp,
+      paired_at: inferredLaptopPairedAt,
+    }];
+  }
 
   return (
 
@@ -160,7 +234,14 @@ export default function DevicePairingPage() {
 
             <div className="w-48 h-48 rounded-xl bg-secondary flex items-center justify-center border border-border/50">
 
-              <QrCode className="w-24 h-24 text-muted-foreground/30"/>
+              {qrCodeUrl
+                ? <img
+                    src={qrCodeUrl}
+                    alt="Pairing QR Code"
+                    className="w-44 h-44 rounded-lg object-contain"
+                  />
+                : <QrCode className="w-24 h-24 text-muted-foreground/30"/>
+              }
 
             </div>
 
@@ -169,6 +250,12 @@ export default function DevicePairingPage() {
           <p className="text-xs text-muted-foreground text-center mb-4">
             Scan this QR code with the FatigueAI mobile app to pair your device
           </p>
+
+          {qrExpiresAt && (
+            <p className="text-[11px] text-muted-foreground text-center mb-3">
+              QR valid until {formatISTDateTime(qrExpiresAt)} IST
+            </p>
+          )}
 
           <div className="flex items-center gap-2 p-3 rounded-lg bg-secondary/50">
 
@@ -212,14 +299,14 @@ export default function DevicePairingPage() {
 
           <div className="space-y-4">
 
-            {devices.length === 0 ? (
+            {displayDevices.length === 0 ? (
               <div className="p-8 text-center">
                 <Smartphone className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No devices connected yet.</p>
                 <p className="text-xs text-muted-foreground mt-1">Use the pairing code above to connect your first device.</p>
               </div>
             ) : (
-              devices.map(device => (
+              displayDevices.map(device => (
 
                 <div key={device.device_id}
                   className="p-4 rounded-xl bg-secondary/50 border border-border/30">
@@ -271,7 +358,7 @@ export default function DevicePairingPage() {
                       <p className="text-muted-foreground">Last Active</p>
 
                       <p className="font-medium mt-0.5">
-                        {device.last_active ? new Date(device.last_active).toLocaleString() : "Never"}
+                        {formatISTDateTime(device.last_active)}
                       </p>
 
                     </div>
@@ -281,7 +368,7 @@ export default function DevicePairingPage() {
                       <p className="text-muted-foreground">Paired At</p>
 
                       <p className="font-medium mt-0.5">
-                        {device.paired_at ? new Date(device.paired_at).toLocaleDateString() : "Not paired"}
+                        {device.paired_at ? formatISTDateTime(device.paired_at) : 'Not paired'}
                       </p>
 
                     </div>

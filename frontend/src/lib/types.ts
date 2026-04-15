@@ -42,6 +42,7 @@ export interface FatiguePrediction{
 export interface ProductivityPrediction{
   productivity_loss_hours:number;
   productivity_score:number;
+  confidence?:number;
   breakdown?:Record<string,number>;
 }
 

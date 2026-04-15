@@ -45,6 +45,12 @@ async def predict_fatigue(request:PredictionRequest):
         )
 
         productivity_score=max(0,100-productivity_loss*5)
+        productivity_confidence=ml_service.estimate_productivity_confidence(
+            len(laptop_data) + len(mobile_data),
+            features.get("productive_ratio", 0.5),
+            features.get("focus_score", 50),
+            productivity_loss,
+        )
 
         prediction_record={
             "_id":str(uuid.uuid4()),
@@ -54,7 +60,8 @@ async def predict_fatigue(request:PredictionRequest):
             "fatigue_level":fatigue_result["level"],
             "confidence":fatigue_result["confidence"],
             "productivity_loss_hours":productivity_loss,
-            "productivity_score":productivity_score
+            "productivity_score":productivity_score,
+            "productivity_confidence":productivity_confidence
         }
 
         await db.db.predictions.insert_one(prediction_record)

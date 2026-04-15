@@ -203,6 +203,47 @@ class MLService:
         except:
             return 65.0
 
+    # ---------------- CONFIDENCE ESTIMATION ----------------
+
+    def estimate_confidence(self, sample_count: int) -> float:
+
+        try:
+
+            if sample_count <= 0:
+                return 0.0
+
+            confidence = min(100, round(sample_count * 5))
+
+            return float(confidence)
+
+        except:
+            return 0.0
+
+    def estimate_productivity_confidence(
+        self,
+        sample_count: int,
+        productive_ratio: float = 0.5,
+        focus_score: float = 50,
+        productivity_loss: float = 0,
+    ) -> float:
+
+        try:
+
+            if sample_count <= 0:
+                return 0.0
+
+            data_confidence = min(55, sample_count * 3)
+            signal_confidence = min(30, abs(productive_ratio - 0.5) * 60)
+            focus_confidence = min(15, abs(focus_score - 50) * 0.3)
+            loss_confidence = min(15, productivity_loss * 2)
+
+            confidence = data_confidence + signal_confidence + focus_confidence + loss_confidence
+
+            return float(min(100, round(confidence)))
+
+        except:
+            return 0.0
+
 
     # ---------------- RECOMMENDATIONS ----------------
 

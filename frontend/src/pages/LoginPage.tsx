@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { motion } from 'framer-motion';
-import { Brain, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function LoginPage() {
@@ -17,6 +17,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login, register } = useAuth();
   const navigate = useNavigate();
+  let submitLabel = 'Create Account';
+  if (loading) {
+    submitLabel = 'Please wait...';
+  } else if (isLogin) {
+    submitLabel = 'Sign In';
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +31,7 @@ export default function LoginPage() {
     try {
       if (isLogin) {
 
-  const result = await login(email, password);
+  await login(email, password);
 
   const userId = localStorage.getItem("user_id");
 
@@ -55,7 +61,7 @@ navigate('/dashboard');
         // Demo mode - store fake user
         localStorage.setItem('auth_token', 'demo_token');
         localStorage.setItem('auth_user', JSON.stringify({ id: 'demo', email, name: name || 'Demo User' }));
-        window.location.href = '/dashboard';
+        globalThis.location.href = '/dashboard';
       } else {
         setError(msg);
       }
@@ -80,10 +86,7 @@ navigate('/dashboard');
       >
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <div className="p-2.5 rounded-xl bg-primary/15 glow-primary">
-              <Brain className="w-6 h-6 text-primary" />
-            </div>
+          <div className="inline-flex items-center mb-4">
             <span className="text-xl font-bold tracking-tight">FatigueAI</span>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -147,7 +150,7 @@ navigate('/dashboard');
             )}
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
+              {submitLabel}
             </Button>
           </form>
 

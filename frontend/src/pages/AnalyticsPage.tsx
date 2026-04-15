@@ -2,7 +2,7 @@ import { useUsageData } from '@/hooks/useUsageData';
 import { ChartCard } from '@/components/ChartCard';
 import { StatCard } from '@/components/StatCard';
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area,
+  BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, Radar,
 } from 'recharts';
@@ -18,6 +18,14 @@ const tooltipStyle = {
   itemStyle: { color: 'hsl(210,20%,95%)' },
   labelStyle: { color: 'hsl(215,12%,50%)' },
 };
+
+function getIstDateKey(date: Date): string {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+function getIstDayLabel(date: Date): string {
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
+}
 
 function formatHoursToReadable(hours: number): string {
   const totalMinutes = Math.round(hours * 60);
@@ -36,8 +44,10 @@ export default function AnalyticsPage() {
 
   const analytics = usageQuery.data.analytics || {};
   
-  // 🔥 Use 7-day laptop_usage from analytics, not today's data
-  const laptop_usage = analytics.laptop_usage || [];
+  // Prefer 7-day analytics payload; fallback to recent usage if analytics is empty.
+  const laptop_usage = (analytics.laptop_usage && analytics.laptop_usage.length > 0)
+    ? analytics.laptop_usage
+    : (usageQuery.data.laptop_usage || []);
 
   /* ---------------- WEEKLY AVG SCREEN TIME & SUMMARY FROM 7 DAYS DATA ---------------- */
 
@@ -51,7 +61,7 @@ export default function AnalyticsPage() {
 
     if (diffDays >= 7) return;
 
-    const date = dateObj.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const date = getIstDateKey(dateObj);
 
     if (!dailyMap[date]) dailyMap[date] = 0;
 
@@ -96,7 +106,7 @@ export default function AnalyticsPage() {
 
   /* ---------------- WEEKLY TREND ---------------- */
 
-  const focusMap: Record<string, { total: number; focus: number }> = {};
+  const focusMap: Record<string, { total: number; focusHigh: number; focusNonLow: number }> = {};
 
   laptop_usage.forEach((u: any) => {
     const dateObj = new Date(u.timestamp);
@@ -104,26 +114,35 @@ export default function AnalyticsPage() {
 
     if (diffDays >= 7) return;
 
-    const date = dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
+    const date = getIstDateKey(dateObj);
     const duration = u.usage_duration || 0;
 
     if (!focusMap[date]) {
-      focusMap[date] = { total: 0, focus: 0 };
+      focusMap[date] = { total: 0, focusHigh: 0, focusNonLow: 0 };
     }
 
+    const category = (u.app_category || '').toString().toUpperCase();
     focusMap[date].total += duration;
-    if ((u.app_category || '').toString().toUpperCase() === 'HIGH') {
-      focusMap[date].focus += duration;
+
+    if (category === 'HIGH') {
+      focusMap[date].focusHigh += duration;
+    }
+
+    if (category !== 'LOW') {
+      focusMap[date].focusNonLow += duration;
     }
   });
 
   const weeklyTrend = Array.from({ length: 7 }, (_, index) => {
     const dayDate = new Date(now.getTime() - (6 - index) * 24 * 60 * 60 * 1000);
-    const dayLabel = dayDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
-    const totals = focusMap[dayLabel] || { total: 0, focus: 0 };
+    const dayKey = getIstDateKey(dayDate);
+    const dayLabel = getIstDayLabel(dayDate);
+    const totals = focusMap[dayKey] || { total: 0, focusHigh: 0, focusNonLow: 0 };
+    const focusedMinutes = totals.focusHigh > 0 ? totals.focusHigh : totals.focusNonLow;
     return {
+      key: dayKey,
       day: dayLabel,
-      focus: totals.total ? Math.round((totals.focus / totals.total) * 100) : 0,
+      focus: totals.total ? Math.round((focusedMinutes / totals.total) * 100) : 0,
     };
   });
 
@@ -216,7 +235,15 @@ export default function AnalyticsPage() {
             <BarChart data={weeklyTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,12%,16%)" />
               <XAxis dataKey="day" tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }} axisLine={false} />
-              <YAxis tickFormatter={(v) => `${v}%`} tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }} axisLine={false} />
+              <YAxis
+                domain={[0, 100]}
+                ticks={[0, 25, 50, 75, 100]}
+                tickFormatter={(v) => `${v}%`}
+                tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }}
+                axisLine={false}
+                allowDecimals={false}
+                width={42}
+              />
               <Tooltip
                 {...tooltipStyle}
                 formatter={(value: any) => `${value}%`}
@@ -326,36 +353,43 @@ export default function AnalyticsPage() {
             {appUsage.map((app, i) => {
               const pct     = Math.min(100, (app.usage_duration / safeTotal) * 100);
               const percent = Math.min(100, Math.round((app.usage_duration / safeTotal) * 100));
-              let barColor = 'hsl(225,14%,22%)';
-              if (i === 0) {
-                barColor = 'hsl(250,80%,65%)';
-              } else if (i === 1) {
-                barColor = 'hsl(200,85%,55%)';
-              }
+              const isBrowser = app.active_app.toLowerCase().includes('chrome');
+              const usageColors = [
+                'hsl(250,80%,65%)',
+                'hsl(200,85%,55%)',
+                'hsl(145,65%,48%)',
+                'hsl(38,92%,55%)',
+                'hsl(0,72%,55%)',
+              ];
+              const barColor = usageColors[i % usageColors.length];
+              const typeLabel = isBrowser ? 'Browser' : 'App';
 
               return (
-                <div key={app.active_app} className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground w-20 truncate">
-                    {app.active_app}
-                  </span>
+                <div
+                  key={app.active_app}
+                  className="space-y-2 rounded-lg border border-border/40 bg-secondary/10 px-3 py-2.5"
+                >
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate leading-tight" title={app.active_app}>
+                        {app.active_app}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{typeLabel}</p>
+                    </div>
+                    <p className="text-xs md:text-sm text-foreground/85 whitespace-nowrap text-right">
+                      {formatHoursToReadable(app.usage_duration / 60)} ({percent}%)
+                    </p>
+                  </div>
 
-                  <div className="flex-1 h-7 rounded-md bg-secondary overflow-hidden relative">
+                  <div className="h-2 rounded-full bg-secondary/80 overflow-hidden">
                     <div
-                      className="h-full rounded-md transition-all duration-700 flex items-center px-2"
+                      className="h-full rounded-full transition-all duration-700"
                       style={{
                         width: `${pct}%`,
                         background: barColor,
                       }}
-                    >
-                      <span className="text-xs font-medium">
-                        {formatHoursToReadable(app.usage_duration / 60)} ({percent}%)
-                      </span>
-                    </div>
+                    />
                   </div>
-
-                  <span className="text-xs text-muted-foreground w-20">
-                    {app.active_app.toLowerCase().includes('chrome') ? 'Browser' : 'App'}
-                  </span>
                 </div>
               );
             })}
@@ -365,3 +399,4 @@ export default function AnalyticsPage() {
     </div>
   );
 }
+

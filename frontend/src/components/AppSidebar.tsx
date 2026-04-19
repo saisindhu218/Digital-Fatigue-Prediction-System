@@ -1,6 +1,7 @@
-import { LayoutDashboard, BarChart3, Sparkles, Lightbulb, Smartphone, LogOut } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Sparkles, Lightbulb, Smartphone, UserCircle2, LogOut, Moon, Sun } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarMenu,
   SidebarMenuButton, SidebarMenuItem, SidebarFooter, useSidebar,
@@ -18,6 +19,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const { logout, user } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <Sidebar collapsible="icon">
@@ -56,12 +58,26 @@ export function AppSidebar() {
 
       <SidebarFooter className="p-3">
         {!collapsed && user && (
-          <div className="px-2 py-1.5 mb-2">
-            <p className="text-xs font-medium truncate">{user.name || user.email}</p>
-            <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
-          </div>
+          <NavLink
+            to="/profile"
+            className="flex items-center gap-2 px-2 py-2 mb-2 rounded-md text-sm font-medium truncate hover:bg-sidebar-accent/60"
+            activeClassName="bg-sidebar-accent text-sidebar-accent-foreground"
+          >
+            <UserCircle2 className="w-4 h-4 shrink-0" />
+            <span className="truncate">{user.name || user.email}</span>
+          </NavLink>
         )}
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={toggleTheme} className="hover:bg-sidebar-accent/60">
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 mr-2" />
+              ) : (
+                <Moon className="w-4 h-4 mr-2" />
+              )}
+              {!collapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={logout} className="hover:bg-destructive/10 hover:text-destructive">
               <LogOut className="w-4 h-4 mr-2" />

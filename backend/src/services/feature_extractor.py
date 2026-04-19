@@ -46,10 +46,8 @@ class LiveFeatureExtractor:
 
             focus_score=self._calculate_focus_score(productive_ratio,idle_ratio,switches_per_hour)
 
-            fatigue_index=self._calculate_fatigue_index(
-                total_screen_hours,idle_ratio,keystrokes_per_hour,
-                mouse_per_hour,switches_per_hour,cognitive_load
-            )
+            # Note: fatigue_index computed separately by MLService.predict_fatigue()
+            # This ensures consistent fatigue calculation across all calls
 
             return{
                 "screen_time":round(total_screen_hours,2),
@@ -63,7 +61,8 @@ class LiveFeatureExtractor:
                 "mouse_per_hour":round(mouse_per_hour,2),
                 "switches_per_hour":round(switches_per_hour,2),
                 "cognitive_load":round(cognitive_load,2),
-                "fatigue_index":round(fatigue_index,2)
+                "session_count":session_count,
+                "total_breaks":breaks
             }
 
         except Exception as e:
@@ -154,36 +153,47 @@ class LiveFeatureExtractor:
         return productive/max(total,1)
 
     def _calculate_cognitive_load(self,data:List[Dict])->float:
-
-        load=0
-        total=0
+        """
+        Calculate weighted cognitive load based on app category + duration spent.
+        HIGH impact apps weighted more if used longer.
+        """
+        weighted_load=0
+        total_duration=0
 
         for item in data:
-
             category=str(item.get("app_category","MEDIUM")).upper()
+            duration=self._get_duration(item)
+            total_duration+=duration
 
+            # Weight by category AND duration spent (high apps with long sessions = higher load)
             if category=="HIGH":
-                load+=3
+                weighted_load+=duration*3  # coding, design, analysis
             elif category=="MEDIUM":
-                load+=2
+                weighted_load+=duration*2  # communication, learning
             else:
-                load+=1
+                weighted_load+=duration*1  # browsing, social
 
-            total+=1
-
-        return load/max(total,1)
+        # Normalize by total duration to get per-hour cognitive load
+        if total_duration>0:
+            return round(min(5.0,weighted_load/total_duration),2)
+        return 2.0
 
     def _calculate_focus_score(self,productive_ratio,idle_ratio,switches_per_hour)->float:
-
-        score=(productive_ratio*100-idle_ratio*50-switches_per_hour*2)
+        """
+        Focus score: (productive work) - (idle/distraction) - (context switching)
+        Range: 0-100, where 100 = perfect focus
+        Weights calibrated for 10-min aggregates: productive apps lower switching penalty.
+        """
+        score=(productive_ratio*80-idle_ratio*40-switches_per_hour*1.2)
 
         return max(0,min(100,score))
 
     def _calculate_fatigue_index(self,screen,idle,keys,mouse,switches,cognitive)->float:
-
-        fatigue=(screen*5+idle*50+switches*1.5+cognitive*10-keys*0.01-mouse*0.005)
-
-        return max(0,min(100,fatigue))
+        """
+        DEPRECATED: Fatigue calculation now happens in MLService.predict_fatigue().
+        This method kept for backward compatibility but result is not used.
+        """
+        return None
 
     def _get_default_features(self)->Dict[str,float]:
 

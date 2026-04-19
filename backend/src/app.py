@@ -74,13 +74,15 @@ from src.routes.auth import router as auth_router
 from src.routes.pairing import router as pairing_router
 from src.routes.usage import router as usage_router
 from src.routes.prediction import router as prediction_router
+from src.routes.preferences import router as preferences_router
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(pairing_router, prefix="/api/v1")
 app.include_router(usage_router, prefix="/api/v1")
 app.include_router(prediction_router, prefix="/api/v1")
+app.include_router(preferences_router, prefix="/api/v1")
 
-print("✅ Routers loaded: auth, pairing, usage, prediction")
+print("✅ Routers loaded: auth, pairing, usage, prediction, preferences")
 
 
 # ---------------- BASIC ROUTES ----------------

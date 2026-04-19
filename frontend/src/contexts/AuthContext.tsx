@@ -9,6 +9,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
+  updateProfile: (updates: { name?: string }) => void;
   logout: () => void;
 }
 
@@ -24,6 +25,44 @@ function safeParse(value: string | null) {
   }
 }
 
+function isValidJwtToken(token: string | null): boolean {
+  if (!token || token === "undefined" || token === "demo_token") return false;
+
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+
+  try {
+    const payload = JSON.parse(atob(parts[1]));
+    if (!payload?.sub || !payload?.user_id) return false;
+
+    if (typeof payload.exp === "number") {
+      const nowInSeconds = Math.floor(Date.now() / 1000);
+      if (payload.exp <= nowInSeconds) return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function decodeUserFromToken(token: string | null, fallbackName?: string): User | null {
+  if (!token) return null;
+
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    if (!payload?.user_id || !payload?.sub) return null;
+
+    return {
+      id: payload.user_id,
+      email: payload.sub,
+      name: fallbackName || payload.sub.split("@")[0],
+    } as User;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -31,16 +70,51 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
 
   useEffect(() => {
     const savedToken = localStorage.getItem("auth_token");
+    const savedRefreshToken = localStorage.getItem("auth_refresh_token");
     const savedUser = localStorage.getItem("auth_user");
 
     const parsedUser = safeParse(savedUser);
 
-    if (savedToken && parsedUser) {
-      setToken(savedToken);
-      setUser(parsedUser);
-    }
+    const bootstrapSession = async () => {
+      if (isValidJwtToken(savedToken) && parsedUser) {
+        setToken(savedToken);
+        setUser(parsedUser);
+        setIsLoading(false);
+        return;
+      }
 
-    setIsLoading(false);
+      if (savedRefreshToken) {
+        const refreshed = await api.refreshSession();
+        if (refreshed?.access_token) {
+          setToken(refreshed.access_token);
+          setUser(parsedUser || decodeUserFromToken(refreshed.access_token));
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("auth_refresh_token");
+      localStorage.removeItem("auth_user");
+      localStorage.removeItem("user_id");
+      setIsLoading(false);
+    };
+
+    void bootstrapSession();
+  }, []);
+
+  useEffect(() => {
+    const handleInvalidation = () => {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("auth_refresh_token");
+      localStorage.removeItem("auth_user");
+      localStorage.removeItem("user_id");
+      setToken(null);
+      setUser(null);
+    };
+
+    globalThis.addEventListener("auth:invalidated", handleInvalidation);
+    return () => globalThis.removeEventListener("auth:invalidated", handleInvalidation);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -49,23 +123,15 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     const token = res.access_token;
 
     // Decode token to get user data since API doesn't return user object
-    let userData: User | null = null;
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        userData = {
-          id: payload.user_id,
-          email: payload.sub,
-          name: payload.sub.split('@')[0],
-        } as User;
-      } catch {
-        userData = null;
-      }
-    }
+    const userData = decodeUserFromToken(token);
 
     if (token) {
       localStorage.setItem("auth_token", token);
       setToken(token);
+    }
+
+    if (res.refresh_token) {
+      localStorage.setItem("auth_refresh_token", res.refresh_token);
     }
 
     if (userData) {
@@ -80,23 +146,15 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     const token = res.access_token;
 
     // Decode token to get user data since API doesn't return user object
-    let userData: User | null = null;
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        userData = {
-          id: payload.user_id,
-          email: payload.sub,
-          name: name,
-        } as User;
-      } catch {
-        userData = null;
-      }
-    }
+    const userData = decodeUserFromToken(token, name);
 
     if (token) {
       localStorage.setItem("auth_token", token);
       setToken(token);
+    }
+
+    if (res.refresh_token) {
+      localStorage.setItem("auth_refresh_token", res.refresh_token);
     }
 
     if (userData) {
@@ -105,9 +163,25 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     }
   }, []);
 
+  const updateProfile = useCallback((updates: { name?: string }) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+
+      const updatedUser: User = {
+        ...prev,
+        ...updates,
+      };
+
+      localStorage.setItem("auth_user", JSON.stringify(updatedUser));
+      return updatedUser;
+    });
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_refresh_token");
     localStorage.removeItem("auth_user");
+    localStorage.removeItem("user_id");
     setToken(null);
     setUser(null);
   }, []);
@@ -119,8 +193,9 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     isLoading,
     login,
     register,
+    updateProfile,
     logout,
-  }), [user, token, isLoading, login, register, logout]);
+  }), [user, token, isLoading, login, register, updateProfile, logout]);
 
   return (
     <AuthContext.Provider value={contextValue}>

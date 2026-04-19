@@ -29,27 +29,27 @@ export function useUsageData() {
     },
 
     staleTime: 0,
-    refetchInterval: 5000,
-    refetchIntervalInBackground: true,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true
   });
 }
 
-export function useTrends(days: number = 7) {
+export function useTrends(days: number = 7, offsetDays: number = 0) {
   const { user } = useAuth();
 
   return useQuery<any>({
-    queryKey: ["trends", user?.id, days],
+    queryKey: ["trends", user?.id, days, offsetDays],
     enabled: !!user?.id,
     queryFn: async () => {
       if (!user?.id) {
         throw new Error("User not available");
       }
-      return api.getTrends(user.id, days);
+      return api.getTrends(user.id, days, offsetDays);
     },
     staleTime: 0,
-    refetchInterval: 5000,
-    refetchIntervalInBackground: true,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true
   });
 }

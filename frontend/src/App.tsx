@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 import DashboardLayout from "@/components/DashboardLayout";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
@@ -11,11 +13,12 @@ import AnalyticsPage from "@/pages/AnalyticsPage";
 import PredictionsPage from "@/pages/PredictionsPage";
 import RecommendationsPage from "@/pages/RecommendationsPage";
 import DevicePairingPage from "@/pages/DevicePairingPage";
+import ProfilePage from "@/pages/ProfilePage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -36,6 +39,7 @@ function AppRoutes() {
         <Route path="/predictions" element={<PredictionsPage />} />
         <Route path="/recommendations" element={<RecommendationsPage />} />
         <Route path="/devices" element={<DevicePairingPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>
@@ -44,15 +48,19 @@ function AppRoutes() {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <NotificationProvider>
+              <AppRoutes />
+            </NotificationProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

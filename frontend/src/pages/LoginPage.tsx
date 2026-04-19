@@ -55,16 +55,8 @@ export default function LoginPage() {
 
 navigate('/dashboard');
     } catch (err: unknown) {
-      // If backend is unreachable, demo login
       const msg = err instanceof Error ? err.message : 'Something went wrong';
-      if (msg === 'Failed to fetch') {
-        // Demo mode - store fake user
-        localStorage.setItem('auth_token', 'demo_token');
-        localStorage.setItem('auth_user', JSON.stringify({ id: 'demo', email, name: name || 'Demo User' }));
-        globalThis.location.href = '/dashboard';
-      } else {
-        setError(msg);
-      }
+      setError(msg);
     } finally {
       setLoading(false);
     }

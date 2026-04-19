@@ -20,8 +20,9 @@ class Database:
 
             self.client = AsyncIOMotorClient(
                 connection_string,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000
+                serverSelectionTimeoutMS=15000,
+                connectTimeoutMS=10000,
+                socketTimeoutMS=15000
             )
 
             # Test connection

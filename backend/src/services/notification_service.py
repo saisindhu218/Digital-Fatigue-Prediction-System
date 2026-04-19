@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import Dict, Any
-from models.usage import PredictionResponse
-from routes.notifications import NotificationCreate
+from typing import Dict, Any, Optional, List
+import uuid
 
 class NotificationService:
     def __init__(self):
@@ -10,74 +9,179 @@ class NotificationService:
             "productivity_loss": 10
         }
     
-    def check_fatigue_threshold(self, prediction: PredictionResponse) -> bool:
+    def create_notification(
+        self,
+        title: str,
+        message: str,
+        notification_type: str,
+        action_url: Optional[str] = None
+    ) -> dict:
+        """Create a new notification"""
+        return {
+            "notification_id": str(uuid.uuid4()),
+            "timestamp": datetime.utcnow().isoformat(),
+            "title": title,
+            "message": message,
+            "type": notification_type,
+            "is_read": False,
+            "action_url": action_url
+        }
+    
+    def check_fatigue_threshold(self, fatigue_score: float, user_goals: dict = None) -> bool:
         """Check if fatigue score exceeds threshold"""
-        return prediction.fatigue_score >= self.thresholds["fatigue_high"]
+        threshold = 70
+        if user_goals:
+            threshold = user_goals.get("max_fatigue_threshold", 70)
+        return fatigue_score >= threshold
     
-    def check_productivity_threshold(self, prediction: PredictionResponse) -> bool:
+    def check_productivity_threshold(self, productivity_loss: float) -> bool:
         """Check if productivity loss exceeds threshold"""
-        return prediction.productivity_loss >= self.thresholds["productivity_loss"]
+        return productivity_loss >= self.thresholds["productivity_loss"]
     
-    def generate_fatigue_alert(self, user_id: str, prediction: PredictionResponse) -> NotificationCreate:
+    def generate_fatigue_alert(
+        self,
+        fatigue_score: float,
+        fatigue_level: str,
+        recommendations: List[str] = None
+    ) -> dict:
         """Generate fatigue alert notification"""
-        return NotificationCreate(
-            user_id=user_id,
-            title="⚠️ High Fatigue Alert",
-            message=f"Your fatigue level is {prediction.fatigue_level} ({prediction.fatigue_score:.0f}%). "
-                   f"Consider taking a break.",
+        return self.create_notification(
+            title="⚠️ High Fatigue Detected",
+            message=f"Your fatigue level is {fatigue_level} ({fatigue_score:.0f}%). Consider taking a break to recharge.",
             notification_type="fatigue_alert",
-            priority="high",
-            data={
-                "fatigue_score": prediction.fatigue_score,
-                "fatigue_level": prediction.fatigue_level,
-                "recommendations": prediction.recommendations[:2]
-            }
+            action_url="/predictions"
         )
     
-    def generate_productivity_alert(self, user_id: str, prediction: PredictionResponse) -> NotificationCreate:
+    def generate_break_alert(self, screen_time_minutes: int) -> dict:
+        """Generate break reminder notification"""
+        return self.create_notification(
+            title="☕ Time for a Break",
+            message=f"You've been working for {screen_time_minutes} minutes. Take a 5-10 minute break to stay productive.",
+            notification_type="break",
+            action_url="/dashboard"
+        )
+    
+    def generate_productivity_alert(self, productivity_loss: float) -> dict:
         """Generate productivity alert notification"""
-        return NotificationCreate(
-            user_id=user_id,
-            title="📉 Productivity Warning",
-            message=f"Productivity loss estimate: {prediction.productivity_loss:.1f} hours/week. "
-                   f"Check recommendations for improvement.",
+        return self.create_notification(
+            title="📉 Productivity Impact",
+            message=f"Estimated productivity loss: {productivity_loss:.1f} hours/week. Check recommendations for improvement.",
             notification_type="productivity_alert",
-            priority="medium",
-            data={
-                "productivity_loss": prediction.productivity_loss,
-                "peak_hours": prediction.peak_hours,
-                "fatigue_windows": prediction.fatigue_prone_windows
-            }
+            action_url="/recommendations"
         )
     
-    def generate_recommendation_notification(self, user_id: str, recommendations: list) -> NotificationCreate:
+    def generate_recommendation_notification(self, recommendation: str, priority: str) -> dict:
         """Generate recommendation notification"""
-        return NotificationCreate(
-            user_id=user_id,
-            title="💡 Personalized Recommendation",
-            message=recommendations[0] if recommendations else "Take regular breaks for better productivity",
+        emoji = "🔴" if priority == "High" else "🟡" if priority == "Medium" else "🟢"
+        return self.create_notification(
+            title=f"💡 Recommendation {emoji}",
+            message=recommendation,
             notification_type="recommendation",
-            priority="low",
-            data={"recommendations": recommendations}
+            action_url="/recommendations"
         )
     
-    def process_prediction_for_notifications(self, user_id: str, prediction: PredictionResponse) -> list:
-        """Process prediction and generate appropriate notifications"""
+    def generate_weekly_digest(
+        self,
+        break_count: int,
+        fatigue_alerts: int,
+        predictions_made: int,
+        insights: str
+    ) -> dict:
+        """Generate weekly digest notification"""
+        return self.create_notification(
+            title="📊 Weekly Fatigue & Productivity Report",
+            message=f"This week: {break_count} break reminders, {fatigue_alerts} fatigue alerts, {predictions_made} predictions. {insights}",
+            notification_type="weekly_digest",
+            action_url="/analytics"
+        )
+    
+    def should_send_notification(self, user_preferences: dict, notification_type: str) -> bool:
+        """Check if notification should be sent based on user preferences"""
+        if not user_preferences:
+            return True
+        
+        preference_type_map = {
+            "break": "break_alerts",
+            "fatigue_alert": "fatigue_alerts",
+            "weekly_digest": "weekly_digest"
+        }
+        
+        pref_key = preference_type_map.get(notification_type)
+        if pref_key:
+            return user_preferences.get(pref_key, True)
+        
+        return True
+    
+    def filter_notifications_by_preferences(
+        self,
+        notifications: List[dict],
+        user_preferences: dict
+    ) -> List[dict]:
+        """Filter notifications based on user preferences"""
+        return [
+            n for n in notifications
+            if self.should_send_notification(user_preferences, n.get("type"))
+        ]
+    
+    def mark_as_read(self, notifications: List[dict], notification_id: str) -> List[dict]:
+        """Mark a notification as read"""
+        for notif in notifications:
+            if notif.get("notification_id") == notification_id:
+                notif["is_read"] = True
+        return notifications
+    
+    def mark_all_as_read(self, notifications: List[dict]) -> List[dict]:
+        """Mark all notifications as read"""
+        for notif in notifications:
+            notif["is_read"] = True
+        return notifications
+    
+    def delete_notification(self, notifications: List[dict], notification_id: str) -> List[dict]:
+        """Delete a notification"""
+        return [n for n in notifications if n.get("notification_id") != notification_id]
+    
+    def get_unread_count(self, notifications: List[dict]) -> int:
+        """Get count of unread notifications"""
+        return sum(1 for n in notifications if not n.get("is_read", False))
+    
+    def get_recent_notifications(self, notifications: List[dict], limit: int = 10) -> List[dict]:
+        """Get recent notifications sorted by timestamp"""
+        sorted_notifs = sorted(
+            notifications,
+            key=lambda x: x.get("timestamp", datetime.utcnow().isoformat()),
+            reverse=True
+        )
+        return sorted_notifs[:limit]
+    
+    def process_prediction_for_notifications(
+        self,
+        fatigue_score: float,
+        fatigue_level: str,
+        productivity_loss: float,
+        screen_time_minutes: int,
+        recommendations: List[str],
+        user_preferences: dict,
+        user_goals: dict
+    ) -> List[dict]:
+        """Process prediction and generate appropriate notifications based on preferences and goals"""
         notifications = []
         
         # Check fatigue threshold
-        if self.check_fatigue_threshold(prediction):
-            notifications.append(self.generate_fatigue_alert(user_id, prediction))
+        if self.check_fatigue_threshold(fatigue_score, user_goals):
+            alert = self.generate_fatigue_alert(fatigue_score, fatigue_level, recommendations)
+            if self.should_send_notification(user_preferences, "fatigue_alert"):
+                notifications.append(alert)
         
         # Check productivity threshold
-        if self.check_productivity_threshold(prediction):
-            notifications.append(self.generate_productivity_alert(user_id, prediction))
+        if self.check_productivity_threshold(productivity_loss):
+            alert = self.generate_productivity_alert(productivity_loss)
+            notifications.append(alert)
         
-        # Always include at least one recommendation
-        if prediction.recommendations:
-            notifications.append(
-                self.generate_recommendation_notification(user_id, prediction.recommendations)
-            )
+        # Check break time
+        if screen_time_minutes > 0 and screen_time_minutes % 60 == 0:
+            alert = self.generate_break_alert(screen_time_minutes)
+            if self.should_send_notification(user_preferences, "break"):
+                notifications.append(alert)
         
         return notifications
 

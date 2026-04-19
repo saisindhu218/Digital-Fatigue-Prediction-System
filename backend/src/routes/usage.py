@@ -1,10 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta, timezone
 from src.database import db
 from src.services.feature_extractor import LiveFeatureExtractor
 from src.services.ml_service import ml_service
 import uuid
 import pytz
+from pymongo.errors import PyMongoError
 router = APIRouter(prefix="/usage", tags=["usage"])
 
 feature_extractor = LiveFeatureExtractor()
@@ -152,20 +153,41 @@ async def receive_mobile_usage(data: dict):
 
 async def run_prediction(user_id: str):
 
-    # Use data from the last 24 hours for predictions
-    cutoff = datetime.utcnow() - timedelta(days=1)
+    now_utc = datetime.utcnow()
+    recent_cutoff = now_utc - timedelta(minutes=60)
+    day_cutoff = now_utc - timedelta(days=1)
 
-    laptop_data = await db.db.usage_data.find({
+    # Primary window: recent 60 minutes to make each 10-minute aggregate affect prediction quickly.
+    recent_laptop = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "laptop",
-        "timestamp": {"$gte": cutoff}
-    }).sort("timestamp", -1).limit(500).to_list(500)
-    
-    mobile_data = await db.db.usage_data.find({
+        "timestamp": {"$gte": recent_cutoff}
+    }).sort("timestamp", -1).limit(200).to_list(200)
+
+    recent_mobile = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "mobile",
-        "timestamp": {"$gte": cutoff}
-    }).sort("timestamp", -1).limit(500).to_list(500)
+        "timestamp": {"$gte": recent_cutoff}
+    }).sort("timestamp", -1).limit(200).to_list(200)
+
+    # Fallback to a broader window only when recent data is too sparse.
+    if len(recent_laptop) + len(recent_mobile) >= 2:
+        laptop_data = recent_laptop
+        mobile_data = recent_mobile
+        prediction_window = "60m"
+    else:
+        laptop_data = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "laptop",
+            "timestamp": {"$gte": day_cutoff}
+        }).sort("timestamp", -1).limit(500).to_list(500)
+
+        mobile_data = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "mobile",
+            "timestamp": {"$gte": day_cutoff}
+        }).sort("timestamp", -1).limit(500).to_list(500)
+        prediction_window = "24h"
 
     features = feature_extractor.extract_features_from_live_data(
         laptop_data,
@@ -185,16 +207,25 @@ async def run_prediction(user_id: str):
         productivity_loss,
     )
 
+    recommendations = ml_service.generate_recommendations(
+        features,
+        fatigue_result,
+        productivity_loss
+    )
+
     prediction_record = {
         "_id": str(uuid.uuid4()),
         "user_id": user_id,
         "timestamp": datetime.utcnow(),
+        "prediction_window": prediction_window,
+        "sample_count": len(laptop_data) + len(mobile_data),
         "fatigue_level": fatigue_result["level"],
         "fatigue_score": fatigue_result["score"],
         "confidence": fatigue_result["confidence"],
         "productivity_loss_hours": productivity_loss,
         "productivity_score": productivity_score,
-        "productivity_confidence": productivity_confidence
+        "productivity_confidence": productivity_confidence,
+        "recommendations": recommendations
     }
 
     try:
@@ -217,22 +248,29 @@ async def get_recent_usage(user_id: str, hours: int = 24):
     # convert cutoff to UTC for DB comparison 
     cutoff = cutoff.astimezone(pytz.utc)
 
-    laptop_data = await db.db.usage_data.find({
-        "user_id": user_id,
-        "data_type": "laptop",
-        "timestamp": {"$gte": cutoff}
-    }).to_list(None)
+    try:
+        laptop_data = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "laptop",
+            "timestamp": {"$gte": cutoff}
+        }).to_list(None)
 
-    mobile_data = await db.db.usage_data.find({
-        "user_id": user_id,
-        "data_type": "mobile",
-        "timestamp": {"$gte": cutoff}
-    }).to_list(None)
+        mobile_data = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "mobile",
+            "timestamp": {"$gte": cutoff}
+        }).to_list(None)
 
-    predictions = await db.db.predictions.find({
-        "user_id": user_id,
-        "timestamp": {"$gte": cutoff}   # 🔥 same cutoff as usage_data
-    }).sort("timestamp", -1).limit(1).to_list(1)
+        predictions = await db.db.predictions.find({
+            "user_id": user_id,
+            "timestamp": {"$gte": cutoff}   # 🔥 same cutoff as usage_data
+        }).sort("timestamp", -1).limit(1).to_list(1)
+    except PyMongoError as e:
+        print(f"❌ DB read error in /recent for user {user_id}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Database is temporarily unavailable. Please retry in a few seconds."
+        )
     
     if not laptop_data and not mobile_data:
         print("⚠️ No data for prediction")
@@ -386,14 +424,18 @@ async def get_recent_usage(user_id: str, hours: int = 24):
             }
         }
 
-        recommendations = ml_service.generate_recommendations(
-            features,
-            {
-                "level": fatigue["fatigue_level"],
-                "score": fatigue["fatigue_score"]
-            },
-            productivity["productivity_loss_hours"]
-        )
+        snapshot_recommendations = p.get("recommendations")
+        if isinstance(snapshot_recommendations, list) and snapshot_recommendations:
+            recommendations = snapshot_recommendations
+        else:
+            recommendations = ml_service.generate_recommendations(
+                features,
+                {
+                    "level": fatigue["fatigue_level"],
+                    "score": fatigue["fatigue_score"]
+                },
+                productivity["productivity_loss_hours"]
+            )
 
 
     return {
@@ -408,17 +450,42 @@ async def get_recent_usage(user_id: str, hours: int = 24):
     }
 
 @router.get("/user/{user_id}/trends")
-async def get_trends(user_id: str, days: int = 7):
+async def get_trends(user_id: str, days: int = 7, offset_days: int = 0):
 
-    # 🔥 Use IST timezone to match frontend expectations
+    # Use IST timezone to match frontend expectations.
     ist_now = datetime.now(pytz.timezone("Asia/Kolkata"))
-    cutoff_ist = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days-1)
-    cutoff = cutoff_ist.astimezone(pytz.utc)
+    offset_days = max(0, offset_days)
 
-    preds = await db.db.predictions.find({
-        "user_id": user_id,
-        "timestamp": {"$gte": cutoff}
-    }).sort("timestamp", 1).to_list(200)
+    # For days=1, allow requesting an older calendar day window (e.g. yesterday).
+    if days == 1:
+        day_start_ist = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=offset_days)
+        day_end_ist = day_start_ist + timedelta(days=1)
+        cutoff = day_start_ist.astimezone(pytz.utc)
+        end_cutoff = day_end_ist.astimezone(pytz.utc)
+        query_filter = {
+            "user_id": user_id,
+            "timestamp": {
+                "$gte": cutoff,
+                "$lt": end_cutoff
+            }
+        }
+    else:
+        # For multi-day views, keep existing behavior and ignore offset.
+        cutoff_ist = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days-1)
+        cutoff = cutoff_ist.astimezone(pytz.utc)
+        query_filter = {
+            "user_id": user_id,
+            "timestamp": {"$gte": cutoff}
+        }
+
+    try:
+        preds = await db.db.predictions.find(query_filter).sort("timestamp", 1).to_list(200)
+    except PyMongoError as e:
+        print(f"❌ DB read error in /trends for user {user_id}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Database is temporarily unavailable. Please retry in a few seconds."
+        )
 
     fatigue_trend = []
     productivity_trend = []

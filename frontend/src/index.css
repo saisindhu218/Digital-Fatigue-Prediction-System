@@ -6,6 +6,60 @@
 
 @layer base {
   :root {
+    --background: 226 35% 97%;
+    --foreground: 228 24% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 228 24% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 228 24% 14%;
+
+    --primary: 258 72% 56%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 226 28% 92%;
+    --secondary-foreground: 226 24% 24%;
+
+    --muted: 226 22% 93%;
+    --muted-foreground: 222 12% 40%;
+
+    --accent: 194 78% 46%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 224 20% 84%;
+    --input: 224 20% 84%;
+    --ring: 258 72% 56%;
+
+    --radius: 0.75rem;
+
+    --success: 145 65% 48%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 10%;
+    --info: 200 85% 55%;
+    --info-foreground: 0 0% 100%;
+
+    --chart-primary: 258 72% 56%;
+    --chart-secondary: 194 78% 46%;
+    --chart-success: 145 65% 48%;
+    --chart-warning: 38 92% 55%;
+    --chart-danger: 0 72% 55%;
+
+    --sidebar-background: 224 40% 98%;
+    --sidebar-foreground: 228 18% 30%;
+    --sidebar-primary: 258 72% 56%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 226 35% 94%;
+    --sidebar-accent-foreground: 228 24% 14%;
+    --sidebar-border: 224 18% 86%;
+    --sidebar-ring: 258 72% 56%;
+  }
+
+  .dark {
     --background: 225 15% 6%;
     --foreground: 210 20% 95%;
 
@@ -33,8 +87,6 @@
     --border: 225 12% 16%;
     --input: 225 12% 16%;
     --ring: 250 80% 65%;
-
-    --radius: 0.75rem;
 
     --success: 145 65% 48%;
     --success-foreground: 0 0% 100%;
@@ -68,11 +120,30 @@
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
+
+  html:not(.dark) body {
+    background-image:
+      radial-gradient(circle at 12% 8%, hsl(258 72% 56% / 0.12), transparent 34%),
+      radial-gradient(circle at 86% 2%, hsl(194 78% 46% / 0.12), transparent 32%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(224 40% 96%));
+    background-attachment: fixed;
+  }
+
+  .dark body {
+    background-image: none;
+  }
 }
 
 @layer utilities {
   .glass-card {
+    @apply border border-border/70;
+    background: linear-gradient(135deg, hsl(var(--card) / 0.92), hsl(var(--secondary) / 0.58));
+    backdrop-filter: blur(10px);
+    box-shadow: 0 14px 30px -20px hsl(228 30% 18% / 0.35);
+  }
+  .dark .glass-card {
     @apply bg-card/60 backdrop-blur-xl border border-border/50;
+    box-shadow: none;
   }
   .gradient-text {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--info))];

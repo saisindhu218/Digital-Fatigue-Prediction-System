@@ -59,7 +59,16 @@ class MLService:
     # ---------------- FATIGUE PREDICTION ----------------
 
     def predict_fatigue(self, features: dict):
-
+        """
+        Predict fatigue level using:
+        1. ML model (if loaded) for pattern-based detection
+        2. Behavioral scoring with recalibrated weights for 10-min windows
+        
+        Key insight: For short (10-min) windows, focus on ACTIVITY QUALITY not just duration.
+        - High keystrokes/mouse in productive apps = less fatigue
+        - Idle time in mandatory-focus tasks = more fatigue
+        - Context switching while in flow state = less problematic
+        """
         try:
 
             screen = features.get("screen_time", 0)
@@ -70,17 +79,25 @@ class MLService:
             cognitive = features.get("cognitive_load", 2)
             night = features.get("night_ratio", 0)
             productive = features.get("productive_ratio", 0)
+            focus = features.get("focus_score", 50)
 
+            # RECALIBRATED for 10-min aggregates: Emphasize activity patterns over raw duration
+            # High activity (keys + mouse) in productive context REDUCES fatigue signal
+            # Idle time without breaks INCREASES fatigue signal
             behavioral_score = (
-                screen * 12 +
-                idle * 40 +
-                switches * 1.5 +
-                cognitive * 8 +
-                night * 25 -
-                productive * 20 -
-                keys * 0.01 -
-                mouse * 0.005
+                screen * 10 +        # Screen exposure (reduced from 12)
+                idle * 35 +          # Idle is biggest fatigue signal (reduced from 40)
+                switches * 1.2 +     # Context switching penalty (reduced from 1.5)
+                cognitive * 9 +      # Cognitive load (increased from 8, more relevant now)
+                night * 20 -         # Night work penalty (reduced from 25)
+                productive * 18 -    # Productive work reduces fatigue (reduced from 20)
+                (keys * 0.008) -     # Activity reduces fatigue (reduced from 0.01)
+                (mouse * 0.004)      # Activity reduces fatigue (reduced from 0.005)
             )
+
+            # Boost for high-activity productive sessions (engaged work = less fatigue)
+            if productive > 0.6 and (keys > 150 or mouse > 200):
+                behavioral_score *= 0.85  # 15% fatigue reduction for engaged productive work
 
             behavioral_score = max(0, min(100, behavioral_score))
 
@@ -142,22 +159,39 @@ class MLService:
     # ---------------- PRODUCTIVITY LOSS ----------------
 
     def predict_productivity_loss(self, features: dict, fatigue_score=None):
-
+        """
+        Estimate productivity loss in hours per day.
+        Recalibrated for 10-min windows:
+        - Factor in actual work quality (focus score, app context)
+        - Reduce penalty for engaged productive sessions
+        - Weight context switching impact by whether user is in flow
+        """
         try:
 
             screen = features.get("screen_time", 0)
             productive = features.get("productive_ratio", 0.5)
             focus = features.get("focus_score", 50)
+            switches = features.get("switches_per_hour", 0)
+            cognitive = features.get("cognitive_load", 2)
 
             if fatigue_score is None:
                 fatigue_score = self.predict_fatigue(features)["score"]
 
+            # Context: is user in engaged productive work?
+            in_flow = productive > 0.65 and focus > 65 and switches < 15
+
+            # RECALIBRATED behavioral loss for 10-min windows
+            # Lower base values since we're measuring shorter periods
             behavioral_loss = (
-                screen * 0.15 +
-                fatigue_score * 0.03 +
-                (1 - productive) * 3 +
-                (100 - focus) * 0.02
+                screen * 0.10 +      # Screen exposure penalty (reduced from 0.15)
+                fatigue_score * 0.025 +  # Fatigue impact (reduced from 0.03)
+                (1 - productive) * 2.5 + # Unproductive time cost (reduced from 3)
+                (100 - focus) * 0.015    # Low focus penalty (reduced from 0.02)
             )
+
+            # If in flow state, reduce context-switching penalty significantly
+            if not in_flow:
+                behavioral_loss += switches * 0.08  # Extra penalty for excessive switching outside flow
 
             behavioral_loss = max(0, min(8, behavioral_loss))
 
@@ -189,13 +223,22 @@ class MLService:
     # ---------------- PRODUCTIVITY SCORE ----------------
 
     def calculate_productivity_score(self, fatigue_score, productive_ratio, focus_score):
-
+        """
+        Calculate overall productivity score (0-100).
+        Recalibrated for 10-min windows:
+        - Emphasize QUALITY over quantity
+        - High productive ratio + focus = excellent productivity
+        - Even with fatigue, engaged work shows good productivity
+        """
         try:
 
+            # Recalibrated weights for shorter windows
+            # More emphasis on quality indicators (focus, productive work)
+            # Less raw emphasis on fatigue in isolation
             score = (
-                productive_ratio * 60 +
-                focus_score * 0.3 +
-                (100 - fatigue_score) * 0.4
+                productive_ratio * 50 +   # Quality of work matters most (reduced from 60)
+                focus_score * 0.4 +       # Focus state important (increased from 0.3)
+                (100 - fatigue_score) * 0.35  # Fatigue inverse (reduced from 0.4)
             )
 
             return round(max(0, min(100, score)), 2)
@@ -265,56 +308,56 @@ class MLService:
             recommendations.append({
                 "type": "fatigue",
                 "title": "Take a break",
-                "description": "Your fatigue level is high. Take a 10-15 minute break away from the screen."
+                "description": f"Fatigue is currently high ({fatigue_score:.0f}%). Take a 10-15 minute break away from the screen."
             })
 
         if fatigue_score > 70:
             recommendations.append({
                 "type": "health",
                 "title": "Reduce screen exposure",
-                "description": "High fatigue score detected. Try reducing continuous screen time."
+                "description": f"High fatigue score detected ({fatigue_score:.0f}%). Try reducing continuous screen exposure now."
             })
 
         if screen > 6:
             recommendations.append({
                 "type": "screen",
                 "title": "Limit long screen sessions",
-                "description": "Your screen time is high today. Consider adding short breaks every hour."
+                "description": f"Screen time is {screen:.1f}h today. Add short breaks every hour to prevent fatigue buildup."
             })
 
         if switches > 20:
             recommendations.append({
                 "type": "focus",
                 "title": "Reduce context switching",
-                "description": "Frequent app switching detected. Try batching similar tasks together."
+                "description": f"Frequent app switching detected ({switches:.1f}/hour). Batch similar tasks to improve focus continuity."
             })
 
         if idle > 0.25:
             recommendations.append({
                 "type": "productivity",
                 "title": "Reduce idle distractions",
-                "description": "High idle time detected. Consider using focus timers or blocking distracting apps."
+                "description": f"Idle ratio is {idle * 100:.0f}%. Use focus timers or block distracting apps during deep work blocks."
             })
 
         if night > 0.4:
             recommendations.append({
                 "type": "sleep",
                 "title": "Avoid late-night usage",
-                "description": "Late-night screen activity may increase fatigue and reduce productivity."
+                "description": f"Late-night usage ratio is {night * 100:.0f}%. Reducing night sessions can improve next-day energy."
             })
 
         if productivity_loss > 3:
             recommendations.append({
                 "type": "productivity",
                 "title": "Improve focus sessions",
-                "description": "Your productivity loss is high today. Try 25-minute focus sessions with breaks."
+                "description": f"Estimated productivity loss is {productivity_loss:.1f}h/week. Try 25-minute focus sessions with planned breaks."
             })
 
         if productive > 0.7 and focus > 70:
             recommendations.append({
                 "type": "positive",
                 "title": "Great focus today",
-                "description": "Your productivity patterns look healthy. Keep maintaining balanced work sessions."
+                "description": f"Strong pattern detected (productive ratio {productive * 100:.0f}%, focus {focus:.0f}). Keep this balanced routine."
             })
 
         if not recommendations:

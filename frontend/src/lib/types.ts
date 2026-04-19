@@ -8,6 +8,7 @@ export interface AuthResponse {
   access_token: string;
   token_type: string;
   user_id: string;
+  refresh_token?: string;
 }
 
 export interface LaptopUsage{
@@ -67,6 +68,12 @@ export interface Trends{
   productivityTrend:{day:string;score:number}[];
 }
 
+export interface Recommendation {
+  type: string;
+  title: string;
+  description: string;
+}
+
 export interface UsageResponse{
   summary:Summary;
 
@@ -77,6 +84,8 @@ export interface UsageResponse{
   mobile_usage:MobileUsage[];
 
   trends?:Trends;
+  analytics?: Analytics;
+  recommendations?: Recommendation[];
 }
 
 export interface DeviceInfo{
@@ -90,13 +99,4 @@ export interface DeviceInfo{
 export interface Analytics {
   daily: { date: string; usage: number }[];
   weekly: { day: string; usage: number }[];
-}
-
-export interface UsageResponse {
-  summary: Summary;
-  predictions: Predictions;
-  laptop_usage: LaptopUsage[];
-  mobile_usage: MobileUsage[];
-  trends?: Trends;
-  analytics?: Analytics;  // add this
 }

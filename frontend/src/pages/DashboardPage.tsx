@@ -3,16 +3,10 @@ import { StatCard } from '@/components/StatCard';
 import { ChartCard } from '@/components/ChartCard';
 import { Brain, Activity, Monitor, Layers, TrendingDown } from 'lucide-react';
 import {
-  LineChart, Line, AreaChart, Area, ComposedChart, Bar,
-  PieChart, Pie, Cell, BarChart,
+  AreaChart, Area, BarChart, Bar,
+  PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-import { 
-  aggregateToHourlyIntervals, 
-  combineLoggedAndPredicted,
-  generateMockTrendData,
-  formatTime 
-} from '@/lib/chartUtils';
 
 const COLORS=[
 'hsl(250,80%,65%)',
@@ -37,29 +31,22 @@ export default function DashboardPage(){
 
 const usageQuery=useUsageData();
 const todayTrendQuery = useTrends(1);
+const yesterdayTrendQuery = useTrends(1, 1);
 
 console.log('Dashboard Debug:', {
   usageQueryLoading: usageQuery.isLoading,
   usageQueryData: usageQuery.data,
   todayTrendQueryLoading: todayTrendQuery.isLoading,
   todayTrendQueryData: todayTrendQuery.data,
-  todayTrendQueryError: todayTrendQuery.error
+  todayTrendQueryError: todayTrendQuery.error,
+  yesterdayTrendQueryLoading: yesterdayTrendQuery.isLoading,
+  yesterdayTrendQueryData: yesterdayTrendQuery.data,
+  yesterdayTrendQueryError: yesterdayTrendQuery.error
 });
 
 if(!usageQuery.data) return null;
 
 const {predictions,summary,laptop_usage}=usageQuery.data;
-
-/* REAL TREND DATA FROM BACKEND */
-const fatigueTrend =
-  usageQuery.data?.trends?.fatigueTrend?.length
-    ? usageQuery.data.trends.fatigueTrend
-    : [{ day: "No Data", score: 0 }];
-
-const productivityTrend =
-  usageQuery.data?.trends?.productivityTrend?.length
-    ? usageQuery.data.trends.productivityTrend
-    : [{ day: "No Data", score: 0 }];
 
 const todayFatigueTrend =
   todayTrendQuery.data?.fatigueTrend?.length
@@ -71,12 +58,32 @@ const todayProductivityTrend =
     ? todayTrendQuery.data.productivityTrend
     : [];
 
+const yesterdayFatigueTrend =
+  yesterdayTrendQuery.data?.fatigueTrend?.length
+    ? yesterdayTrendQuery.data.fatigueTrend
+    : [];
+
+const yesterdayProductivityTrend =
+  yesterdayTrendQuery.data?.productivityTrend?.length
+    ? yesterdayTrendQuery.data.productivityTrend
+    : [];
+
 const todayFatigueData = (todayFatigueTrend || []).map((item: any) => ({
   time: item.day || item.time,
   logged: item.score,
 }));
 
 const todayProductivityData = (todayProductivityTrend || []).map((item: any) => ({
+  time: item.day || item.time,
+  logged: item.score,
+}));
+
+const yesterdayFatigueData = (yesterdayFatigueTrend || []).map((item: any) => ({
+  time: item.day || item.time,
+  logged: item.score,
+}));
+
+const yesterdayProductivityData = (yesterdayProductivityTrend || []).map((item: any) => ({
   time: item.day || item.time,
   logged: item.score,
 }));
@@ -98,20 +105,62 @@ const aggregatedProductivityData = todayProductivityData.length > 0
     })
   : [];
 
-// Use real data if available, otherwise generate mock data with realistic patterns
+const aggregatedYesterdayFatigueData = yesterdayFatigueData.length > 0
+  ? yesterdayFatigueData.sort((a: any, b: any) => {
+      const timeA = new Date(`2024-01-01 ${a.time}`).getTime();
+      const timeB = new Date(`2024-01-01 ${b.time}`).getTime();
+      return timeA - timeB;
+    })
+  : [];
+
+const aggregatedYesterdayProductivityData = yesterdayProductivityData.length > 0
+  ? yesterdayProductivityData.sort((a: any, b: any) => {
+      const timeA = new Date(`2024-01-01 ${a.time}`).getTime();
+      const timeB = new Date(`2024-01-01 ${b.time}`).getTime();
+      return timeA - timeB;
+    })
+  : [];
+
+const usingYesterdayFallback =
+  aggregatedFatigueData.length === 0 &&
+  aggregatedProductivityData.length === 0 &&
+  (aggregatedYesterdayFatigueData.length > 0 || aggregatedYesterdayProductivityData.length > 0);
+
+// Use today's real data when present; before first prediction of the day, show yesterday's data.
 const finalFatigueData = aggregatedFatigueData.length > 0 
   ? aggregatedFatigueData 
-  : generateMockTrendData(24, 3).map((d: any) => ({
-      time: d.time,
-      logged: d.logged,
-    }));
+  : aggregatedYesterdayFatigueData;
 
 const finalProductivityData = aggregatedProductivityData.length > 0 
   ? aggregatedProductivityData 
-  : generateMockTrendData(24, 3).map((d: any) => ({
-      time: d.time,
-      logged: d.predicted,
-    }));
+  : aggregatedYesterdayProductivityData;
+
+const trendTitleSuffix = usingYesterdayFallback ? 'Yesterday' : 'Today';
+const trendSubtitle = usingYesterdayFallback
+  ? 'Showing yesterday until first prediction is available today'
+  : 'Hourly measurements';
+
+const productivityVsFatigueData = Array.from(
+  new Set([
+    ...finalFatigueData.map((item: any) => item.time),
+    ...finalProductivityData.map((item: any) => item.time),
+  ])
+)
+  .map((time) => {
+    const fatiguePoint = finalFatigueData.find((item: any) => item.time === time);
+    const productivityPoint = finalProductivityData.find((item: any) => item.time === time);
+
+    return {
+      time,
+      fatigue: fatiguePoint?.logged ?? 0,
+      productivity: productivityPoint?.logged ?? 0,
+    };
+  })
+  .sort((a, b) => {
+    const timeA = new Date(`2024-01-01 ${a.time}`).getTime();
+    const timeB = new Date(`2024-01-01 ${b.time}`).getTime();
+    return timeA - timeB;
+  });
 
 // ✅ Combine app usage (group by app name)
 const appMap: Record<string, number> = {};
@@ -279,8 +328,7 @@ icon={<Layers className="w-4 h-4"/>}
 
 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-  {/* FATIGUE TREND - AREA CHART WITH TODAY'S DATA */}
-  <ChartCard title="Fatigue Trend - Today" subtitle="Hourly measurements">
+  <ChartCard title={`Fatigue Trend - ${trendTitleSuffix}`} subtitle={trendSubtitle}>
     <ResponsiveContainer width="100%" height={280}>
       <AreaChart data={finalFatigueData}>
         <defs>
@@ -301,16 +349,16 @@ icon={<Layers className="w-4 h-4"/>}
           domain={[0, 100]}
           tickFormatter={(v) => `${v}%`}
         />
-        <Tooltip 
-          {...tooltipStyle} 
+        <Tooltip
+          {...tooltipStyle}
           formatter={(value: any) => `${value}%`}
           labelFormatter={(label) => `Time: ${label}`}
         />
         <Legend />
-        <Area 
-          type="monotone" 
-          dataKey="logged" 
-          stroke="hsl(250,80%,65%)" 
+        <Area
+          type="monotone"
+          dataKey="logged"
+          stroke="hsl(250,80%,65%)"
           fill="url(#fatigueGradient)"
           strokeWidth={2.5}
           name="Fatigue Score"
@@ -319,8 +367,7 @@ icon={<Layers className="w-4 h-4"/>}
     </ResponsiveContainer>
   </ChartCard>
 
-  {/* PRODUCTIVITY TREND - AREA CHART WITH TODAY'S DATA */}
-  <ChartCard title="Productivity Trend - Today" subtitle="Hourly measurements">
+  <ChartCard title={`Productivity Trend - ${trendTitleSuffix}`} subtitle={trendSubtitle}>
     <ResponsiveContainer width="100%" height={280}>
       <AreaChart data={finalProductivityData}>
         <defs>
@@ -341,22 +388,83 @@ icon={<Layers className="w-4 h-4"/>}
           domain={[0, 100]}
           tickFormatter={(v) => `${v}%`}
         />
-        <Tooltip 
-          {...tooltipStyle} 
+        <Tooltip
+          {...tooltipStyle}
           formatter={(value: any) => `${value}%`}
           labelFormatter={(label) => `Time: ${label}`}
         />
         <Legend />
-        <Area 
-          type="monotone" 
-          dataKey="logged" 
-          stroke="hsl(145,65%,48%)" 
+        <Area
+          type="monotone"
+          dataKey="logged"
+          stroke="hsl(145,65%,48%)"
           fill="url(#productivityGradient)"
           strokeWidth={2.5}
           name="Productivity Score"
         />
       </AreaChart>
     </ResponsiveContainer>
+  </ChartCard>
+
+</div>
+
+<div className="grid grid-cols-1 gap-4">
+
+  <ChartCard
+    title={`Fatigue vs Productivity Comparison - ${trendTitleSuffix}`}
+    subtitle={
+      usingYesterdayFallback
+        ? 'Showing yesterday until first prediction is available today'
+        : 'Grouped bars by time slot for direct comparison'
+    }
+  >
+    <ResponsiveContainer width="100%" height={300}>
+      <BarChart data={productivityVsFatigueData} barGap={4} barCategoryGap="22%">
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,12%,16%)" />
+        <XAxis
+          dataKey="time"
+          tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }}
+          axisLine={false}
+        />
+        <YAxis
+          tick={{ fill: 'hsl(215,12%,50%)', fontSize: 11 }}
+          axisLine={false}
+          domain={[0, 100]}
+          tickFormatter={(v) => `${v}%`}
+        />
+        <Tooltip
+          {...tooltipStyle}
+          formatter={(value: any, name: any) => [`${value}%`, name]}
+          labelFormatter={(label: any) => `Time: ${label}`}
+        />
+        <Legend />
+        <Bar
+          dataKey="fatigue"
+          fill="hsl(250,80%,65%)"
+          name="Fatigue"
+          radius={[4, 4, 0, 0]}
+          maxBarSize={18}
+        />
+        <Bar
+          dataKey="productivity"
+          fill="hsl(145,65%,48%)"
+          name="Productivity"
+          radius={[4, 4, 0, 0]}
+          maxBarSize={18}
+        />
+      </BarChart>
+    </ResponsiveContainer>
+
+    <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: 'hsl(250,80%,65%)' }} />
+        <span>Fatigue bar per time</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: 'hsl(145,65%,48%)' }} />
+        <span>Productivity bar per time</span>
+      </div>
+    </div>
   </ChartCard>
 
 </div>

@@ -207,6 +207,14 @@ export default function DevicePairingPage() {
     }];
   }
 
+  displayDevices = displayDevices.filter((device: any) => {
+    const name = (device?.device_name || '').toLowerCase();
+    const id = (device?.device_id || '').toLowerCase();
+    const hasTestMarker = /test|sample|mock|demo/.test(name) || /test|sample|mock|demo/.test(id);
+
+    return device?.status === 'connected' && !hasTestMarker;
+  });
+
   return (
 
     <div className="space-y-6 animate-fade-in">

@@ -36,13 +36,61 @@ function formatHoursToReadable(hours: number): string {
   return `${h} hr ${m} min`;
 }
 
+function getRecordFocusScore(u: any): number {
+  const category = (u?.app_category || '').toString().toUpperCase();
+
+  if (category === 'HIGH') return 100;
+  if (category === 'MEDIUM') return 65;
+  if (category === 'LOW') return 30;
+
+  // If category is missing/unknown, derive a conservative score from behavior signals.
+  const idleSeconds = Number(u?.idle_time_seconds || 0);
+  const appSwitches = Number(u?.app_switches || 0);
+
+  if (idleSeconds > 180) return 25;
+  if (idleSeconds > 90 || appSwitches > 30) return 40;
+  if (appSwitches > 18) return 50;
+  return 55;
+}
+
 export default function AnalyticsPage() {
   const now = new Date();
   const usageQuery = useUsageData();
 
-  if (!usageQuery.data) return null;
+  if (usageQuery.isLoading) {
+    return (
+      <div className="space-y-2 animate-fade-in">
+        <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+        <p className="text-sm text-muted-foreground">Loading analytics...</p>
+      </div>
+    );
+  }
+
+  if (usageQuery.isError) {
+    return (
+      <div className="space-y-2 animate-fade-in">
+        <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+        <p className="text-sm text-muted-foreground">Unable to load analytics data right now.</p>
+      </div>
+    );
+  }
+
+  if (!usageQuery.data) {
+    return (
+      <div className="space-y-2 animate-fade-in">
+        <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+        <p className="text-sm text-muted-foreground">No analytics data available.</p>
+      </div>
+    );
+  }
 
   const analytics = usageQuery.data.analytics || {};
+
+  const last7IstDayKeys = Array.from({ length: 7 }, (_, index) => {
+    const dayDate = new Date(now.getTime() - (6 - index) * 24 * 60 * 60 * 1000);
+    return getIstDateKey(dayDate);
+  });
+  const last7IstDayKeySet = new Set(last7IstDayKeys);
   
   // Prefer 7-day analytics payload; fallback to recent usage if analytics is empty.
   const laptop_usage = (analytics.laptop_usage && analytics.laptop_usage.length > 0)
@@ -51,15 +99,20 @@ export default function AnalyticsPage() {
 
   /* ---------------- WEEKLY AVG SCREEN TIME & SUMMARY FROM 7 DAYS DATA ---------------- */
 
+  const recentLaptopUsage = (laptop_usage || []).filter((u: any) => {
+    const dateObj = new Date(u.timestamp);
+    if (Number.isNaN(dateObj.getTime())) return false;
+
+    // Bucket strictly by IST calendar day so specific dates (e.g. 13th, 14th) match Mongo aggregation.
+    const istDayKey = getIstDateKey(dateObj);
+    return last7IstDayKeySet.has(istDayKey);
+  });
+
   const dailyMap: Record<string, number> = {};
   const appMap: Record<string, number> = {};
-  let totalSessions = 0;
 
-  laptop_usage.forEach((u) => {
+  recentLaptopUsage.forEach((u: any) => {
     const dateObj = new Date(u.timestamp);
-    const diffDays = (now.getTime() - dateObj.getTime()) / (1000 * 60 * 60 * 24);
-
-    if (diffDays >= 7) return;
 
     const date = getIstDateKey(dateObj);
 
@@ -72,77 +125,94 @@ export default function AnalyticsPage() {
     // Track apps for most used
     const app = u.active_app || 'Unknown';
     appMap[app] = (appMap[app] || 0) + (u.usage_duration || 0);
-    
-    // Track sessions
-    if (u.session_id) totalSessions++;
   });
+
+  const sortedByTime = [...recentLaptopUsage].sort(
+    (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  let weeklyBreaks = 0;
+  for (let i = 1; i < sortedByTime.length; i++) {
+    const prev = new Date(sortedByTime[i - 1].timestamp).getTime();
+    const curr = new Date(sortedByTime[i].timestamp).getTime();
+    if (curr - prev > 10 * 60 * 1000) {
+      weeklyBreaks++;
+    }
+  }
 
   const totalMinutes = Object.values(dailyMap).reduce((a, b) => a + b, 0);
   const avgScreenTime = Math.round((totalMinutes / 7 / 60) * 100) / 100;
   
-  // Calculate focus from 7-day data
-  const focusScore = Math.max(0, Math.min(100, 100 - (totalSessions || 0)));
-  
+  // Calculate focus directly from DB usage logs (no random/default summary blending).
+  const weeklyFocusTotals = recentLaptopUsage.reduce(
+    (acc: { weighted: number; minutes: number }, u: any) => {
+      const minutes = Number(u?.usage_duration || 0);
+      if (minutes <= 0) return acc;
+
+      acc.weighted += getRecordFocusScore(u) * minutes;
+      acc.minutes += minutes;
+      return acc;
+    },
+    { weighted: 0, minutes: 0 }
+  );
+
+  const focusScore = weeklyFocusTotals.minutes > 0
+    ? Math.round(weeklyFocusTotals.weighted / weeklyFocusTotals.minutes)
+    : 0;
+
   // Most used app in past 7 days
   const mostUsedApp = Object.keys(appMap).length > 0 
     ? Object.entries(appMap).sort((a, b) => b[1] - a[1])[0][0]
     : 'None';
   
-  // Break frequency in past 7 days
-  const breakFrequency = Math.max(1, Math.floor((totalSessions || 0) / 5));
+  // Break count inferred from >10-minute activity gaps in past 7 days
+  const breakFrequency = weeklyBreaks;
 
   /* ---------------- DAILY USAGE ---------------- */
 
   const dailyUsage = (analytics.daily ?? [])
-    .map((d: any) => {
-      const dateObj = new Date(d.date);
+    .map((d: any, index: number) => {
       return {
-        date: dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+        date: String(d.date || ''),
         usage: (d.usage || 0) / 60,
-        rawDate: dateObj,
+        order: index,
       };
     })
-    .sort((a: any, b: any) => a.rawDate.getTime() - b.rawDate.getTime());
+    .sort((a: any, b: any) => a.order - b.order);
 
   /* ---------------- WEEKLY TREND ---------------- */
 
-  const focusMap: Record<string, { total: number; focusHigh: number; focusNonLow: number }> = {};
+  const focusMap: Record<string, { total: number; weightedFocus: number }> = {};
 
-  laptop_usage.forEach((u: any) => {
+  recentLaptopUsage.forEach((u: any) => {
     const dateObj = new Date(u.timestamp);
-    const diffDays = (now.getTime() - dateObj.getTime()) / (1000 * 60 * 60 * 24);
-
-    if (diffDays >= 7) return;
-
     const date = getIstDateKey(dateObj);
     const duration = u.usage_duration || 0;
 
     if (!focusMap[date]) {
-      focusMap[date] = { total: 0, focusHigh: 0, focusNonLow: 0 };
+      focusMap[date] = { total: 0, weightedFocus: 0 };
     }
 
-    const category = (u.app_category || '').toString().toUpperCase();
     focusMap[date].total += duration;
-
-    if (category === 'HIGH') {
-      focusMap[date].focusHigh += duration;
-    }
-
-    if (category !== 'LOW') {
-      focusMap[date].focusNonLow += duration;
-    }
+    focusMap[date].weightedFocus += getRecordFocusScore(u) * duration;
   });
 
   const weeklyTrend = Array.from({ length: 7 }, (_, index) => {
     const dayDate = new Date(now.getTime() - (6 - index) * 24 * 60 * 60 * 1000);
-    const dayKey = getIstDateKey(dayDate);
+    const dayKey = last7IstDayKeys[index];
     const dayLabel = getIstDayLabel(dayDate);
-    const totals = focusMap[dayKey] || { total: 0, focusHigh: 0, focusNonLow: 0 };
-    const focusedMinutes = totals.focusHigh > 0 ? totals.focusHigh : totals.focusNonLow;
+    const totals = focusMap[dayKey] || { total: 0, weightedFocus: 0 };
+    // Focus for each day must come only from that day's logs.
+    // If there are no logs on a day, keep focus at 0 for that day.
+    const focus = totals.total
+      ? Math.round(totals.weightedFocus / totals.total)
+      : 0;
+
     return {
       key: dayKey,
       day: dayLabel,
-      focus: totals.total ? Math.round((focusedMinutes / totals.total) * 100) : 0,
+      focus: Math.max(0, Math.min(100, focus)),
+      hasLogs: totals.total > 0,
     };
   });
 
@@ -151,15 +221,20 @@ export default function AnalyticsPage() {
       (p: any) => p.day === fatigue.day
     );
 
+    const parsedDay = new Date(fatigue.day);
+    const dayLabel = Number.isNaN(parsedDay.getTime())
+      ? String(fatigue.day)
+      : parsedDay.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
     return {
-      day: new Date(fatigue.day).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+      day: dayLabel,
       fatigue: fatigue.score,
       productivity: productivity?.score ?? 0,
     };
   });
 
-  const fatigueConfidence = usageQuery.data?.predictions?.fatigue?.confidence ?? 0;
-  const productivityConfidence = usageQuery.data?.predictions?.productivity?.confidence ?? 0;
+  const fatigueConfidence = Math.max(0, Math.min(100, usageQuery.data?.predictions?.fatigue?.confidence ?? 0));
+  const productivityConfidence = Math.max(0, Math.min(100, usageQuery.data?.predictions?.productivity?.confidence ?? 0));
 
   /* ---------------- RADAR ---------------- */
 
@@ -230,7 +305,7 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Weekly Focus Ratio" subtitle="Focused work percentage by day">
+        <ChartCard title="Weekly Focus Ratio" subtitle="Focused work percentage by day (0 when no logs)">
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={weeklyTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(225,12%,16%)" />
@@ -246,7 +321,12 @@ export default function AnalyticsPage() {
               />
               <Tooltip
                 {...tooltipStyle}
-                formatter={(value: any) => `${value}%`}
+                formatter={(value: any, _name: any, props: any) => {
+                  if (!props?.payload?.hasLogs) {
+                    return 'No logs';
+                  }
+                  return `${value}%`;
+                }}
               />
               <Bar dataKey="focus" fill="hsl(145,65%,48%)" radius={[4, 4, 0, 0]} name="Focus %" />
             </BarChart>

@@ -21,7 +21,8 @@ class Settings:
     # JWT
     SECRET_KEY = os.getenv("SECRET_KEY")
     ALGORITHM = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "20"))
+    REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
     
     # QR Codes
     QR_CODE_EXPIRY_MINUTES = int(os.getenv("QR_CODE_EXPIRY_MINUTES", "5"))
@@ -37,8 +38,9 @@ class Settings:
 settings = Settings()
 
 # ADD THESE DEBUG LINES
-print(f"🔧 Config loaded:")
+print("🔧 Config loaded:")
 print(f"   MongoDB URL: {settings.MONGODB_URL.split('@')[0]}@***")
 print(f"   Database: {settings.DATABASE_NAME}")
 print(f"   JWT Algorithm: {settings.ALGORITHM}")
-print(f"   Token expiry: {settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
+print(f"   Access token expiry: {settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
+print(f"   Refresh token expiry: {settings.REFRESH_TOKEN_EXPIRE_DAYS} days")

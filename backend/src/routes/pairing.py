@@ -12,6 +12,15 @@ router = APIRouter(prefix="/pairing", tags=["device-pairing"])
 ACTIVE_USER = {"user_id": None}
 
 
+def is_test_device_record(device_id: str | None = None, device_name: str | None = None) -> bool:
+    """Exclude seeded/mock devices from user-facing connected device lists."""
+    did = (device_id or "").strip().lower()
+    dname = (device_name or "").strip().lower()
+
+    test_markers = ("test", "sample", "mock", "demo")
+    return any(marker in did for marker in test_markers) or any(marker in dname for marker in test_markers)
+
+
 # ---------------- SAVE ACTIVE USER ----------------
 
 @router.post("/save-user")
@@ -240,6 +249,9 @@ async def get_device_status(user_id: str | None = None):
             if not device_id:
                 continue
 
+            if is_test_device_record(device_id=device_id, device_name=usage.get("device_name")):
+                continue
+
             fallback_paired_at = await get_first_seen_timestamp(device_id)
 
             inferred_devices.setdefault(device_id, {
@@ -276,20 +288,15 @@ async def get_device_status(user_id: str | None = None):
         ):
             continue
 
+        if is_test_device_record(device_id=device.get("device_id"), device_name=device.get("device_name")):
+            continue
+
         # Check if device has recent activity (within last 24 hours)
         recent_activity = await db.db.usage_data.find_one({
             "user_id": user_id,
             "device_id": device.get("device_id"),
             "timestamp": {"$gte": recent_cutoff}
         })
-
-        # Fallback: if device_id mapping drifted, try matching by device type.
-        if not recent_activity and device.get("device_type"):
-            recent_activity = await db.db.usage_data.find_one({
-                "user_id": user_id,
-                "data_type": device.get("device_type"),
-                "timestamp": {"$gte": recent_cutoff}
-            })
 
         # Final fallback: trust device heartbeat if last_active itself is recent.
         is_recent_by_last_active = False
@@ -335,6 +342,9 @@ async def get_device_status(user_id: str | None = None):
         for usage in recent_usage:
             device_id = usage.get("device_id")
             if not device_id:
+                continue
+
+            if is_test_device_record(device_id=device_id, device_name=usage.get("device_name")):
                 continue
 
             fallback_paired_at = await get_first_seen_timestamp(device_id)

@@ -84,6 +84,11 @@ class MLService:
             # RECALIBRATED for 10-min aggregates: Emphasize activity patterns over raw duration
             # High activity (keys + mouse) in productive context REDUCES fatigue signal
             # Idle time without breaks INCREASES fatigue signal
+
+            # Add break reward and session penalty
+            fatigue_break_bonus = features.get("fatigue_break_bonus", 0)
+            fatigue_session_penalty = features.get("fatigue_session_penalty", 0)
+
             behavioral_score = (
                 screen * 10 +        # Screen exposure (reduced from 12)
                 idle * 35 +          # Idle is biggest fatigue signal (reduced from 40)
@@ -93,6 +98,8 @@ class MLService:
                 productive * 18 -    # Productive work reduces fatigue (reduced from 20)
                 (keys * 0.008) -     # Activity reduces fatigue (reduced from 0.01)
                 (mouse * 0.004)      # Activity reduces fatigue (reduced from 0.005)
+                + fatigue_break_bonus # Reward for breaks
+                + fatigue_session_penalty # Penalty for long sessions
             )
 
             # Boost for high-activity productive sessions (engaged work = less fatigue)

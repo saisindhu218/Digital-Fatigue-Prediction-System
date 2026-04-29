@@ -251,4 +251,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(notification)
     }),
+  // ACTIVITY LOGGING (web)
+  logActivity: (userId: string, events: any[]) =>
+    request(`/usage/user/${userId}/activity`, {
+      method: "POST",
+      body: JSON.stringify({ events }),
+    }),
 };

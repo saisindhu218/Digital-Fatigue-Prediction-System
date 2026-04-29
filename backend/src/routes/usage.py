@@ -1,3 +1,40 @@
+# ---------------- IN-BROWSER ACTIVITY LOGGING (WEB) ----------------
+
+from fastapi import APIRouter, Request
+
+# Create router instance if missing
+router = APIRouter()
+
+@router.post("/user/{user_id}/activity")
+async def log_web_activity(user_id: str, payload: dict, request: Request):
+    """
+    Receives activity events from the web app (browser).
+    Expects: { events: [ {type, ts, ...}, ... ] }
+    """
+    events = payload.get("events", [])
+    if not events:
+        return {"status": "no events"}
+
+    docs = []
+    now = datetime.utcnow()
+    for event in events:
+        doc = {
+            "_id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "timestamp": event.get("ts", now),
+            "event_type": event.get("type"),
+            "event_data": {k: v for k, v in event.items() if k not in ("ts", "type")},
+            "source": "web"
+        }
+        docs.append(doc)
+
+    try:
+        if docs:
+            await db.db.usage_data.insert_many(docs)
+        return {"status": "ok", "inserted": len(docs)}
+    except Exception as e:
+        print("❌ Web activity log error:", e)
+        raise HTTPException(status_code=500, detail="Failed to log activity events")
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta, timezone
 from src.database import db

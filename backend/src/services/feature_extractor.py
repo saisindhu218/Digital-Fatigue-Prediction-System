@@ -10,63 +10,76 @@ from typing import Dict,List,Optional
 
 class LiveFeatureExtractor:
 
-    def extract_features_from_live_data(self,laptop_data:List[Dict],mobile_data:List[Dict],user_id:Optional[str]=None)->Dict[str,float]:
 
-        all_data=laptop_data+mobile_data
+    def extract_features_from_live_data(self, laptop_data: List[Dict], mobile_data: List[Dict], user_id: Optional[str] = None) -> Dict[str, float]:
+        """
+        Enhanced: merges laptop/mobile, rewards breaks, uses session count, robust edge handling, easy tuning.
+        """
+        all_data = (laptop_data or []) + (mobile_data or [])
         if not all_data:
             return self._get_default_features()
 
         try:
+            # --- Parameter Weights (easy tuning) ---
+            BREAK_REWARD = 8      # Each break reduces fatigue by this much
+            SESSION_PENALTY = 6   # Each long session increases fatigue by this much
+            LONG_SESSION_MIN = 45 # Minutes: session longer than this is penalized
 
-            total_screen_seconds=sum(self._get_duration(x) for x in all_data)
-            total_screen_hours=total_screen_seconds/3600
+            total_screen_seconds = sum(self._get_duration(x) for x in all_data)
+            total_screen_hours = total_screen_seconds / 3600
 
-            session_count=len(all_data)
-            avg_session_hours=total_screen_hours/max(session_count,1)
+            session_count = len(all_data)
+            avg_session_hours = total_screen_hours / max(session_count, 1)
 
-            total_idle_seconds=sum(float(x.get("idle_time_seconds",0)) for x in laptop_data)
-            idle_ratio=total_idle_seconds/max(total_screen_seconds,1)
+            # Merge idle, keystrokes, mouse, switches from both sources
+            total_idle_seconds = sum(float(x.get("idle_time_seconds", 0)) for x in all_data)
+            idle_ratio = total_idle_seconds / max(total_screen_seconds, 1)
 
-            total_keystrokes=sum(int(x.get("keystrokes",0)) for x in laptop_data)
-            keystrokes_per_hour=total_keystrokes/max(total_screen_hours,1)
+            total_keystrokes = sum(int(x.get("keystrokes", 0)) for x in all_data)
+            keystrokes_per_hour = total_keystrokes / max(total_screen_hours, 1)
 
-            total_mouse=sum(
-                int(x.get("mouse_clicks",0))+int(x.get("mouse_moves",0))
-                for x in laptop_data
+            total_mouse = sum(
+                int(x.get("mouse_clicks", 0)) + int(x.get("mouse_moves", 0))
+                for x in all_data
             )
-            mouse_per_hour=total_mouse/max(total_screen_hours,1)
+            mouse_per_hour = total_mouse / max(total_screen_hours, 1)
 
-            total_switches=sum(int(x.get("app_switches",0)) for x in laptop_data)
-            switches_per_hour=total_switches/max(total_screen_hours,1)
+            total_switches = sum(int(x.get("app_switches", 0)) for x in all_data)
+            switches_per_hour = total_switches / max(total_screen_hours, 1)
 
-            breaks=self._calculate_breaks(all_data)
-            night_ratio=self._calculate_night_ratio(all_data)
-            productive_ratio=self._calculate_productive_ratio(all_data)
-            cognitive_load=self._calculate_cognitive_load(laptop_data)
+            breaks = self._calculate_breaks(all_data)
+            night_ratio = self._calculate_night_ratio(all_data)
+            productive_ratio = self._calculate_productive_ratio(all_data)
+            cognitive_load = self._calculate_cognitive_load(all_data)
 
-            focus_score=self._calculate_focus_score(productive_ratio,idle_ratio,switches_per_hour)
+            focus_score = self._calculate_focus_score(productive_ratio, idle_ratio, switches_per_hour)
 
-            # Note: fatigue_index computed separately by MLService.predict_fatigue()
-            # This ensures consistent fatigue calculation across all calls
+            # --- Reward breaks, penalize long sessions ---
+            fatigue_break_bonus = -BREAK_REWARD * breaks
+            long_sessions = [x for x in all_data if self._get_duration(x) / 60 > LONG_SESSION_MIN]
+            fatigue_session_penalty = SESSION_PENALTY * len(long_sessions)
 
-            return{
-                "screen_time":round(total_screen_hours,2),
-                "avg_session":round(avg_session_hours,2),
-                "breaks":breaks,
-                "night_ratio":round(night_ratio,2),
-                "productive_ratio":round(productive_ratio,2),
-                "focus_score":round(focus_score,2),
-                "idle_ratio":round(idle_ratio,3),
-                "keystrokes_per_hour":round(keystrokes_per_hour,2),
-                "mouse_per_hour":round(mouse_per_hour,2),
-                "switches_per_hour":round(switches_per_hour,2),
-                "cognitive_load":round(cognitive_load,2),
-                "session_count":session_count,
-                "total_breaks":breaks
+            # --- Return all features, plus break/session bonuses for fatigue model ---
+            return {
+                "screen_time": round(total_screen_hours, 2),
+                "avg_session": round(avg_session_hours, 2),
+                "breaks": breaks,
+                "night_ratio": round(night_ratio, 2),
+                "productive_ratio": round(productive_ratio, 2),
+                "focus_score": round(focus_score, 2),
+                "idle_ratio": round(idle_ratio, 3),
+                "keystrokes_per_hour": round(keystrokes_per_hour, 2),
+                "mouse_per_hour": round(mouse_per_hour, 2),
+                "switches_per_hour": round(switches_per_hour, 2),
+                "cognitive_load": round(cognitive_load, 2),
+                "session_count": session_count,
+                "total_breaks": breaks,
+                "fatigue_break_bonus": fatigue_break_bonus,
+                "fatigue_session_penalty": fatigue_session_penalty
             }
 
         except Exception as e:
-            print("Feature extraction error:",e)
+            print("Feature extraction error:", e)
             return self._get_default_features()
 
     def _get_duration(self,item:Dict)->float:
@@ -152,30 +165,53 @@ class LiveFeatureExtractor:
 
         return productive/max(total,1)
 
-    def _calculate_cognitive_load(self,data:List[Dict])->float:
+    def _calculate_cognitive_load(self, data: List[Dict]) -> float:
         """
         Calculate weighted cognitive load based on app category + duration spent.
-        HIGH impact apps weighted more if used longer.
+        Both total and uninterrupted video (LOW) usage increase fatigue.
         """
-        weighted_load=0
-        total_duration=0
+        weighted_load = 0
+        total_duration = 0
+        total_low_duration = 0
+        max_consecutive_low = 0
+        current_consecutive_low = 0
+        threshold_long_video = 30 * 60  # 30 minutes in seconds
 
         for item in data:
-            category=str(item.get("app_category","MEDIUM")).upper()
-            duration=self._get_duration(item)
-            total_duration+=duration
+            category = str(item.get("app_category", "MEDIUM")).upper()
+            duration = self._get_duration(item)
+            total_duration += duration
 
-            # Weight by category AND duration spent (high apps with long sessions = higher load)
-            if category=="HIGH":
-                weighted_load+=duration*3  # coding, design, analysis
-            elif category=="MEDIUM":
-                weighted_load+=duration*2  # communication, learning
-            else:
-                weighted_load+=duration*1  # browsing, social
+            if category == "HIGH":
+                weighted_load += duration * 3  # coding, design, analysis
+                if current_consecutive_low > max_consecutive_low:
+                    max_consecutive_low = current_consecutive_low
+                current_consecutive_low = 0
+            elif category == "MEDIUM":
+                weighted_load += duration * 2  # communication, learning
+                if current_consecutive_low > max_consecutive_low:
+                    max_consecutive_low = current_consecutive_low
+                current_consecutive_low = 0
+            else:  # LOW (video/music/social)
+                total_low_duration += duration
+                current_consecutive_low += duration
+                weighted_load += duration * 0.7  # interrupted/short video = moderate fatigue
+
+        # After loop, check last streak
+        if current_consecutive_low > max_consecutive_low:
+            max_consecutive_low = current_consecutive_low
+
+        # If total video time is high, add extra fatigue
+        if total_low_duration >= threshold_long_video:
+            weighted_load += (total_low_duration - threshold_long_video) * 1.2  # extra fatigue for high total
+
+        # If any single uninterrupted session is very long, add bonus fatigue
+        if max_consecutive_low >= threshold_long_video:
+            weighted_load += (max_consecutive_low - threshold_long_video) * 1.5
 
         # Normalize by total duration to get per-hour cognitive load
-        if total_duration>0:
-            return round(min(5.0,weighted_load/total_duration),2)
+        if total_duration > 0:
+            return round(min(5.0, weighted_load / total_duration), 2)
         return 2.0
 
     def _calculate_focus_score(self,productive_ratio,idle_ratio,switches_per_hour)->float:

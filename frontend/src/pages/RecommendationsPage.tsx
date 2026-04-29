@@ -1,6 +1,8 @@
 import { useUsageData } from '@/hooks/useUsageData';
 import { motion } from 'framer-motion';
 import { Coffee, Moon, Repeat, Target, Smartphone, Eye, Brain, Sparkles, CheckCircle } from 'lucide-react';
+import { useNotifications } from '@/contexts/NotificationContext';
+import { useEffect, useRef } from 'react';
 
 type Recommendation = {
   type: string;
@@ -111,6 +113,8 @@ function getIcon(name: string) {
 
 export default function RecommendationsPage() {
   const { data, isLoading, error } = useUsageData();
+  const { addNotification, notifications } = useNotifications();
+  const notifiedRef = useRef(false);
 
   if (isLoading) {
     return (
@@ -134,6 +138,7 @@ export default function RecommendationsPage() {
     );
   }
 
+
   const recommendations = sanitizeRecommendations((data as { recommendations?: unknown }).recommendations);
   const effectiveRecommendations = recommendations.length > 0 ? recommendations : buildFallbackRecommendations(data);
 
@@ -146,6 +151,28 @@ export default function RecommendationsPage() {
   const mediumCount = sortedRecommendations.filter((rec) => getPriority(rec) === 'Medium').length;
   const lowCount = sortedRecommendations.filter((rec) => getPriority(rec) === 'Low').length;
   const count = sortedRecommendations.length;
+
+  // Notify user if there are recommendations and not already notified this session
+  useEffect(() => {
+    if (count > 0 && !notifiedRef.current) {
+      // Avoid duplicate notifications in the same session
+      const alreadyNotified = notifications.some(
+        (n) => n.type === 'recommendation' && n.title === 'You have new recommendations' && !n.is_read
+      );
+      if (!alreadyNotified) {
+        addNotification({
+          notification_id: `rec-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          title: 'You have new recommendations',
+          message: 'Check the Recommendations page for personalized suggestions.',
+          type: 'recommendation',
+          is_read: false,
+          action_url: '/recommendations',
+        });
+        notifiedRef.current = true;
+      }
+    }
+  }, [count, addNotification, notifications]);
 
   return (
     <div className="space-y-6 animate-fade-in">

@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from src.config import settings
+import json
 
 
 class MLService:
@@ -58,94 +59,110 @@ class MLService:
 
     # ---------------- FATIGUE PREDICTION ----------------
 
+    def get_app_category(self, app, title):
+        """
+        Dynamically categorize apps based on updated keywords or external configuration.
+        """
+        name = (app + " " + title).lower()
+        high = ["code", "pycharm", "intellij", "studio", "notepad", "sublime"]
+        medium = ["word", "excel", "powerpoint", "docs", "reading"]
+        low = ["youtube", "netflix", "spotify", "instagram", "facebook", "video"]
+        
+        # Dynamically load additional categories from a configuration file or API
+        try:
+            with open("app_categories.json", "r") as f:
+                categories = json.load(f)
+                high.extend(categories.get("high", []))
+                medium.extend(categories.get("medium", []))
+                low.extend(categories.get("low", []))
+        except Exception as e:
+            print("[CATEGORY LOAD ERROR]", e)
+
+        if any(x in name for x in high):
+            return "HIGH"
+        elif any(x in name for x in medium):
+            return "MEDIUM"
+        elif any(x in name for x in low):
+            return "LOW"
+        return "MEDIUM"
+
     def predict_fatigue(self, features: dict):
         """
-        Predict fatigue level using:
-        1. ML model (if loaded) for pattern-based detection
-        2. Behavioral scoring with recalibrated weights for 10-min windows
-        
-        Key insight: For short (10-min) windows, focus on ACTIVITY QUALITY not just duration.
-        - High keystrokes/mouse in productive apps = less fatigue
-        - Idle time in mandatory-focus tasks = more fatigue
-        - Context switching while in flow state = less problematic
+        Refined fatigue prediction logic with dynamic adjustments.
         """
         try:
+            # Extract features with defaults
+            feature_defaults = {
+                "screen_time": 0,
+                "idle_ratio": 0,
+                "switches_per_hour": 0,
+                "keystrokes_per_hour": 0,
+                "mouse_per_hour": 0,
+                "cognitive_load": 2,
+                "night_ratio": 0,
+                "productive_ratio": 0,
+                "fatigue_break_bonus": 0,
+                "fatigue_session_penalty": 0
+            }
+            extracted_features = {key: features.get(key, default) for key, default in feature_defaults.items()}
 
-            screen = features.get("screen_time", 0)
-            idle = features.get("idle_ratio", 0)
-            switches = features.get("switches_per_hour", 0)
-            keys = features.get("keystrokes_per_hour", 0)
-            mouse = features.get("mouse_per_hour", 0)
-            cognitive = features.get("cognitive_load", 2)
-            night = features.get("night_ratio", 0)
-            productive = features.get("productive_ratio", 0)
-            focus = features.get("focus_score", 50)
+            # Adjust idle time weight dynamically
+            idle_weight = 30 if extracted_features["idle_ratio"] < 0.5 else 40
 
-            # RECALIBRATED for 10-min aggregates: Emphasize activity patterns over raw duration
-            # High activity (keys + mouse) in productive context REDUCES fatigue signal
-            # Idle time without breaks INCREASES fatigue signal
-
-            # Add break reward and session penalty
-            fatigue_break_bonus = features.get("fatigue_break_bonus", 0)
-            fatigue_session_penalty = features.get("fatigue_session_penalty", 0)
-
+            # Calculate behavioral score
             behavioral_score = (
-                screen * 10 +        # Screen exposure (reduced from 12)
-                idle * 35 +          # Idle is biggest fatigue signal (reduced from 40)
-                switches * 1.2 +     # Context switching penalty (reduced from 1.5)
-                cognitive * 9 +      # Cognitive load (increased from 8, more relevant now)
-                night * 20 -         # Night work penalty (reduced from 25)
-                productive * 18 -    # Productive work reduces fatigue (reduced from 20)
-                (keys * 0.008) -     # Activity reduces fatigue (reduced from 0.01)
-                (mouse * 0.004)      # Activity reduces fatigue (reduced from 0.005)
-                + fatigue_break_bonus # Reward for breaks
-                + fatigue_session_penalty # Penalty for long sessions
+                extracted_features["screen_time"] * 10 +
+                extracted_features["idle_ratio"] * idle_weight +
+                extracted_features["switches_per_hour"] * 1.2 +
+                extracted_features["cognitive_load"] * 9 +
+                extracted_features["night_ratio"] * 20 -
+                extracted_features["productive_ratio"] * 18 -
+                (extracted_features["keystrokes_per_hour"] * 0.008) -
+                (extracted_features["mouse_per_hour"] * 0.004) +
+                extracted_features["fatigue_break_bonus"] +
+                extracted_features["fatigue_session_penalty"]
             )
 
-            # Boost for high-activity productive sessions (engaged work = less fatigue)
-            if productive > 0.6 and (keys > 150 or mouse > 200):
-                behavioral_score *= 0.85  # 15% fatigue reduction for engaged productive work
+            # Boost for high-activity productive sessions
+            if extracted_features["productive_ratio"] > 0.6 and (
+                extracted_features["keystrokes_per_hour"] > 150 or
+                extracted_features["mouse_per_hour"] > 200
+            ):
+                behavioral_score *= 0.85
 
             behavioral_score = max(0, min(100, behavioral_score))
 
             if self.is_loaded:
-
                 X = pd.DataFrame([{
-                    "screen_time": features.get("screen_time", 0),
+                    "screen_time": extracted_features["screen_time"],
                     "avg_session": features.get("avg_session", 0),
                     "breaks": features.get("breaks", 0),
-                    "night_ratio": features.get("night_ratio", 0),
-                    "productive_ratio": features.get("productive_ratio", 0)
+                    "night_ratio": extracted_features["night_ratio"],
+                    "productive_ratio": extracted_features["productive_ratio"]
                 }])
 
                 pred = self.fatigue_classifier.predict(X)[0]
                 label = self.fatigue_label_encoder.inverse_transform([pred])[0]
 
-                if hasattr(self.fatigue_classifier, "predict_proba"):
-                    confidence = float(
-                        max(self.fatigue_classifier.predict_proba(X)[0])
-                    )
-                else:
-                    confidence = 0.85
+                confidence = (
+                    float(max(self.fatigue_classifier.predict_proba(X)[0]))
+                    if hasattr(self.fatigue_classifier, "predict_proba")
+                    else 0.85
+                )
 
-                if label == "Low":
-                    score = behavioral_score * 0.5
-                elif label == "Medium":
-                    score = behavioral_score * 0.8
-                else:
-                    score = behavioral_score
+                score = behavioral_score * {
+                    "Low": 0.5,
+                    "Medium": 0.8
+                }.get(label, 1)
 
             else:
-
                 score = behavioral_score
                 confidence = 0.82
-
-                if score < 35:
-                    label = "Low"
-                elif score < 65:
-                    label = "Medium"
-                else:
-                    label = "High"
+                label = (
+                    "Low" if score < 35 else
+                    "Medium" if score < 65 else
+                    "High"
+                )
 
             return {
                 "level": label,
@@ -153,10 +170,10 @@ class MLService:
                 "confidence": confidence
             }
 
+        except KeyError as e:
+            print("⚠️ Missing feature key:", e)
         except Exception as e:
-
             print("⚠️ Fatigue prediction error:", e)
-
             return {
                 "level": "Medium",
                 "score": 50,

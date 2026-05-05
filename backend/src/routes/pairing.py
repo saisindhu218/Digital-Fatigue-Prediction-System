@@ -1,9 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timedelta
 from src.models.device import DeviceCreate, QRToken, DevicePairingStatus
 from src.services.qr_service import QRService
 from src.database import db
 import uuid
+
+from fastapi.responses import RedirectResponse
+
 
 router = APIRouter(prefix="/pairing", tags=["device-pairing"])
 
@@ -124,6 +127,8 @@ async def generate_qr_code(device_data: DeviceCreate):
         device_type=device_data.device_type
     )
 
+   #  pair_url = f"http://192.168.0.101:8000/api/v1/pairing/scan?token={qr_data['token']}"
+
     await db.db.qr_tokens.insert_one({
         "token": qr_data["token"],
         "user_id": device_data.user_id,
@@ -133,11 +138,14 @@ async def generate_qr_code(device_data: DeviceCreate):
         "created_at": datetime.utcnow()
     })
 
-    return QRToken(
-        token=qr_data["token"],
-        qr_code_url=qr_data["qr_code_url"],
-        expires_at=qr_data["expires_at"]
-    )
+    print("QR DATA:", qr_data)
+
+    
+    return {
+       "token": qr_data["token"],
+       "qr_code_url": qr_data["qr_code_url"],
+       "expires_at": qr_data["expires_at"]
+    }
 
 
 # ---------------- VERIFY PAIRING ----------------
@@ -327,7 +335,11 @@ async def get_device_status(user_id: str | None = None):
             "device_id": device.get("device_id"),
             "device_name": resolved_name,
             "device_type": device.get("device_type", "unknown"),
-            "status": "connected" if (recent_activity or is_recent_by_last_active) else "disconnected",
+            "status": (
+                device.get("status", "disconnected")
+                if device.get("device_type") == "mobile"
+                else ("connected" if (recent_activity or is_recent_by_last_active) else "disconnected")
+            ),
             "last_active": resolved_last_active,
             "paired_at": (
                 device.get("paired_at").isoformat()
@@ -365,3 +377,99 @@ async def get_device_status(user_id: str | None = None):
         "last_synced": latest_usage["timestamp"].isoformat() if latest_usage else None,
         "data_points": total_data_points
     }
+
+
+    
+
+from fastapi.responses import HTMLResponse
+
+@router.get("/scan", response_class=HTMLResponse)
+async def scan_qr(token: str, request: Request):
+
+    qr_token = await db.db.qr_tokens.find_one({"token": token})
+
+    if not qr_token:
+        return "<h2>❌ Invalid QR</h2>"
+
+    if datetime.utcnow() > qr_token["expires_at"]:
+        return "<h2>⏰ QR Expired</h2>"
+
+    # Detect device
+    user_agent = request.headers.get("user-agent", "").lower()
+
+    if "android" in user_agent:
+        device_name = "Android Phone"
+    elif "iphone" in user_agent:
+        device_name = "iPhone"
+    else:
+        device_name = "Mobile Device"
+
+    import uuid
+
+    device_id = request.cookies.get("device_id")
+
+    if not device_id:
+        device_id = "mobile_" + uuid.uuid4().hex[:8]
+
+
+    existing = await db.db.devices.find_one({
+        "device_id": device_id,
+        "user_id": qr_token["user_id"]
+    })
+
+    if not existing:
+        await db.db.devices.insert_one({
+            "device_id": device_id,
+            "device_type": "mobile",
+            "device_name": device_name,
+            "user_id": qr_token["user_id"],
+            "paired_at": datetime.utcnow(),
+            "pairing_status": "paired",
+            "last_active": datetime.utcnow(),
+            "status": "connected"
+        })
+    else:
+        await db.db.devices.update_one(
+            {"_id": existing["_id"]},
+            {
+                "$set": {
+                    "last_active": datetime.utcnow(),
+                    "device_name": device_name,
+                    "status": "connected"
+                }
+            }
+        )
+
+    response = HTMLResponse(f"""
+<html>
+    <body style="font-family:sans-serif;text-align:center;padding:40px;">
+        <h1>✅ Device Connected</h1>
+        <p>{device_name} is now connected to laptop</p>
+        <p>You can close this page</p>
+    </body>
+</html>
+""")
+
+    response.set_cookie("device_id", device_id)
+
+    return response
+
+@router.post("/disconnect")
+async def disconnect_device(device_id: str):
+
+    device = await db.db.devices.find_one({"device_id": device_id})
+
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    await db.db.devices.update_one(
+        {"_id": device["_id"]},
+        {
+            "$set": {
+                "status": "disconnected",
+                "last_active": datetime.utcnow()
+            }
+        }
+    )
+
+    return {"message": "Device disconnected"}    

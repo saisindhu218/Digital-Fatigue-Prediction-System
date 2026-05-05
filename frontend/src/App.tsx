@@ -17,6 +17,7 @@ import DevicePairingPage from "@/pages/DevicePairingPage";
 import ProfilePage from "@/pages/ProfilePage";
 import NotFound from "./pages/NotFound";
 
+
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {

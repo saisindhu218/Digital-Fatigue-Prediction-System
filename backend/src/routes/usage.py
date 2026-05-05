@@ -1,9 +1,14 @@
 # ---------------- IN-BROWSER ACTIVITY LOGGING (WEB) ----------------
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
+from datetime import datetime
+import uuid
+from src.database import db
 
 # Create router instance if missing
-router = APIRouter()
+# router = APIRouter()
+
+router = APIRouter(prefix="/usage", tags=["usage"])
 
 @router.post("/user/{user_id}/activity")
 async def log_web_activity(user_id: str, payload: dict, request: Request):
@@ -35,7 +40,7 @@ async def log_web_activity(user_id: str, payload: dict, request: Request):
     except Exception as e:
         print("❌ Web activity log error:", e)
         raise HTTPException(status_code=500, detail="Failed to log activity events")
-from fastapi import APIRouter, HTTPException
+
 from datetime import datetime, timedelta, timezone
 from src.database import db
 from src.services.feature_extractor import LiveFeatureExtractor
@@ -43,7 +48,7 @@ from src.services.ml_service import ml_service
 import uuid
 import pytz
 from pymongo.errors import PyMongoError
-router = APIRouter(prefix="/usage", tags=["usage"])
+
 
 feature_extractor = LiveFeatureExtractor()
 

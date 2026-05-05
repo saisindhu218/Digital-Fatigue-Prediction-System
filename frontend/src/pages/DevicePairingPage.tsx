@@ -382,7 +382,23 @@ export default function DevicePairingPage() {
                     </div>
 
                   </div>
+                     
 
+                     {device.device_type === "mobile" && (
+  <Button
+    variant="destructive"
+    size="sm"
+    className="mt-2 px-3 py-1 text-xs w-auto"
+    onClick={async () => {
+      await fetch(`${API_BASE}/pairing/disconnect?device_id=${device.device_id}`, {
+        method: "POST"
+      });
+      loadStatus();
+    }}
+  >
+    Disconnect
+  </Button>
+)}
                 </div>
 
               ))

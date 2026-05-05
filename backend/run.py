@@ -126,11 +126,13 @@ def main():
         print("Environment load failed.")
         return
 
-    start_activity_logger()
 
 # ✅ CORRECT PLACE
     free_port(8000)
 
+    start_activity_logger()
+    
+    
     print("\nStarting FastAPI server...")
     print("API Docs: http://localhost:8000/docs")
     print("Health:   http://localhost:8000/health")
@@ -146,6 +148,8 @@ def main():
         )
     except Exception as e:
         print("Server failed:", e)
+
+      
 
 # ==============================
 # AUTO FREE PORT (PERMANENT FIX)

@@ -76,7 +76,7 @@ class Database:
 
             print(f"⚠️ Index initialization warning: {e}")
 
-    async def disconnect(self):
+    def disconnect(self):
 
         if self.client:
 

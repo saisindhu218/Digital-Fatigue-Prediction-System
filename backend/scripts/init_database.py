@@ -51,7 +51,7 @@ async def init_database():
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
     finally:
-        await db.disconnect()
+        db.disconnect()
 
 async def create_test_user():
     """Create a test user for development"""

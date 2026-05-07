@@ -1,15 +1,20 @@
 from fastapi import APIRouter,HTTPException
-from datetime import datetime,timedelta
+from datetime import datetime, timedelta, timezone
 from src.models.usage import PredictionRequest,PredictionResponse
 from src.services.ml_service import ml_service
 from src.services.feature_extractor import LiveFeatureExtractor
 from src.database import db
 import uuid
+from pymongo.errors import PyMongoError
 
 router=APIRouter(prefix="/prediction",tags=["predictions"])
 feature_extractor=LiveFeatureExtractor()
 
-@router.post("/predict",response_model=PredictionResponse)
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+@router.post("/predict",response_model=PredictionResponse, responses={503: {"description": "Database not available"}, 404: {"description": "No usage data available"}, 500: {"description": "Prediction failed"}})
 async def predict_fatigue(request:PredictionRequest):
 
     if db.db is None:
@@ -17,19 +22,23 @@ async def predict_fatigue(request:PredictionRequest):
 
     try:
 
-        cutoff=datetime.utcnow()-timedelta(hours=6)
+        cutoff=utc_now()-timedelta(hours=6)
 
         laptop_data=await db.db.usage_data.find({
             "user_id":request.user_id,
             "data_type":"laptop",
             "timestamp":{"$gte":cutoff}
         }).to_list(200)
-
         mobile_data=await db.db.usage_data.find({
             "user_id":request.user_id,
             "data_type":"mobile",
             "timestamp":{"$gte":cutoff}
         }).to_list(200)
+
+        
+    except PyMongoError as e:
+        print(f"❌ DB error in /predict: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
 
         if not laptop_data and not mobile_data:
             raise HTTPException(status_code=404,detail="No usage data available")
@@ -55,7 +64,7 @@ async def predict_fatigue(request:PredictionRequest):
         prediction_record={
             "_id":str(uuid.uuid4()),
             "user_id":request.user_id,
-            "timestamp":datetime.utcnow(),
+            "timestamp":utc_now(),
             "fatigue_score":fatigue_result["score"],
             "fatigue_level":fatigue_result["level"],
             "confidence":fatigue_result["confidence"],
@@ -64,7 +73,11 @@ async def predict_fatigue(request:PredictionRequest):
             "productivity_confidence":productivity_confidence
         }
 
-        await db.db.predictions.insert_one(prediction_record)
+        try:
+            await db.db.predictions.insert_one(prediction_record)
+        except PyMongoError as e:
+            print(f"❌ DB write error saving prediction: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Prediction could not be saved.")
 
         recommendations=generate_recommendations(
             fatigue_result["score"],features,productivity_score
@@ -121,13 +134,16 @@ def generate_recommendations(fatigue_score,features,productivity_score):
 
 @router.get("/user/{user_id}/history")
 async def get_prediction_history(user_id:str,limit:int=20):
+    try:
+        predictions=await db.db.predictions.find({
+            "user_id":user_id
+        }).sort("timestamp",-1).limit(limit).to_list(limit)
 
-    predictions=await db.db.predictions.find({
-        "user_id":user_id
-    }).sort("timestamp",-1).limit(limit).to_list(limit)
-
-    return{
-        "user_id":user_id,
-        "predictions":predictions,
-        "total":len(predictions)
-    }
+        return{
+            "user_id":user_id,
+            "predictions":predictions,
+            "total":len(predictions)
+        }
+    except PyMongoError as e:
+        print(f"❌ DB read error in /prediction/history for user {user_id}: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")

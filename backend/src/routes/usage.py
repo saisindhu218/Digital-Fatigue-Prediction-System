@@ -1,46 +1,5 @@
-# ---------------- IN-BROWSER ACTIVITY LOGGING (WEB) ----------------
 
-from fastapi import APIRouter, Request, HTTPException
-from datetime import datetime
-import uuid
-from src.database import db
-
-# Create router instance if missing
-# router = APIRouter()
-
-router = APIRouter(prefix="/usage", tags=["usage"])
-
-@router.post("/user/{user_id}/activity")
-async def log_web_activity(user_id: str, payload: dict, request: Request):
-    """
-    Receives activity events from the web app (browser).
-    Expects: { events: [ {type, ts, ...}, ... ] }
-    """
-    events = payload.get("events", [])
-    if not events:
-        return {"status": "no events"}
-
-    docs = []
-    now = datetime.utcnow()
-    for event in events:
-        doc = {
-            "_id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "timestamp": event.get("ts", now),
-            "event_type": event.get("type"),
-            "event_data": {k: v for k, v in event.items() if k not in ("ts", "type")},
-            "source": "web"
-        }
-        docs.append(doc)
-
-    try:
-        if docs:
-            await db.db.usage_data.insert_many(docs)
-        return {"status": "ok", "inserted": len(docs)}
-    except Exception as e:
-        print("❌ Web activity log error:", e)
-        raise HTTPException(status_code=500, detail="Failed to log activity events")
-
+from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta, timezone
 from src.database import db
 from src.services.feature_extractor import LiveFeatureExtractor
@@ -50,39 +9,51 @@ import pytz
 from pymongo.errors import PyMongoError
 
 
+
+router = APIRouter(prefix="/usage", tags=["usage"])
+
 feature_extractor = LiveFeatureExtractor()
 
-ist = pytz.timezone("Asia/Kolkata")
+IST_TIMEZONE_NAME = "Asia/Kolkata"
+IST = pytz.timezone(IST_TIMEZONE_NAME)
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 # ---------------- HELPER ----------------
 
 async def resolve_user(device_id: str):
 
-    device = await db.db.devices.find_one({"device_id": device_id})
+    try:
+        device = await db.db.devices.find_one({"device_id": device_id})
 
-    if device and device.get("user_id"):
-        return device.get("user_id")
+        if device and device.get("user_id"):
+            return device.get("user_id")
 
-    # 🔥 AUTO-FIX: get user from latest login/session
-    user = await db.db.users.find_one({}, sort=[("created_at", -1)])
+        # 🔥 AUTO-FIX: get user from latest login/session
+        user = await db.db.users.find_one({}, sort=[("created_at", -1)])
 
-    if user:
-        user_id = user.get("_id")
+        if user:
+            user_id = user.get("_id")
 
-        # save mapping automatically
-        await db.db.devices.insert_one({
-            "device_id": device_id,
-            "user_id": user_id,
-            "linked_at": datetime.utcnow()
-        })
+            # save mapping automatically
+            await db.db.devices.insert_one({
+                "device_id": device_id,
+                "user_id": user_id,
+                "linked_at": utc_now()
+            })
 
-        print(f"✅ Device mapped automatically: {device_id} → {user_id}")
+            print(f"✅ Device mapped automatically: {device_id} → {user_id}")
 
-        return user_id
+            return user_id
 
-    print("❌ No user found")
-    return None
+        print("❌ No user found")
+        return None
+    except PyMongoError as e:
+        print(f"❌ DB error in resolve_user: {e}")
+        return None
 
 
 # ---------------- LAPTOP DATA ----------------
@@ -98,7 +69,7 @@ async def receive_laptop_usage(data: dict):
         "user_id": user_id,
         "device_id": device_id,
         "session_id": data.get("session_id"),
-        "timestamp": datetime.utcnow(),
+        "timestamp": utc_now(),
         "data_type": "laptop",
         "active_app": data.get("active_app"),
         "app_category": data.get("app_category"),
@@ -112,12 +83,16 @@ async def receive_laptop_usage(data: dict):
         "time_of_day": data.get("time_of_day")
     }
 
-    await db.db.usage_data.insert_one(record)
+    try:
+        await db.db.usage_data.insert_one(record)
 
-    if user_id:
-        await run_prediction(user_id)
+        if user_id:
+            await run_prediction(user_id)
 
-    return {"status": "ok"}
+        return {"status": "ok"}
+    except PyMongoError as e:
+        print(f"❌ DB write error in /laptop: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
 
 
 # ---------------- LAPTOP BATCH ----------------
@@ -141,7 +116,7 @@ async def receive_laptop_batch(payload: dict):
             "user_id": user_id,
             "device_id": device_id,
             "session_id": r.get("session_id"),
-            "timestamp": datetime.utcnow(),
+            "timestamp": utc_now(),
             "data_type": "laptop",
             "active_app": r.get("active_app"),
             "app_category": r.get("app_category"),
@@ -155,13 +130,75 @@ async def receive_laptop_batch(payload: dict):
             "time_of_day": r.get("time_of_day")
         }
 
+        try:
+            await db.db.usage_data.insert_one(record)
+            inserted += 1
+        except PyMongoError as e:
+            print(f"❌ DB write error in /laptop/batch for record {record.get('_id')}: {e}")
+            # continue processing remaining records but don't trigger prediction
+            continue
+
+    try:
+        if inserted > 0 and resolved_user:
+            await run_prediction(resolved_user)
+
+        return {"status": "ok", "records_inserted": inserted}
+    except PyMongoError as e:
+        print(f"❌ DB error when triggering prediction after batch: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Prediction deferred.")
+
+
+# ---------------- LEGACY WEB ACTIVITY COMPATIBILITY ----------------
+
+@router.post(
+    "/user/{user_id}/activity",
+    responses={400: {"description": "events must be a list"}},
+)
+async def receive_legacy_activity(user_id: str, payload: dict):
+
+    events = payload.get("events", [])
+
+    if not isinstance(events, list):
+        raise HTTPException(status_code=400, detail="events must be a list")
+
+    if not events:
+        return {"status": "ok", "records_inserted": 0}
+
+    keystrokes = sum(1 for event in events if event.get("type") == "keydown")
+    mouse_moves = sum(1 for event in events if event.get("type") == "mousemove")
+    mouse_clicks = sum(1 for event in events if event.get("type") == "click")
+    focus_events = sum(
+        1
+        for event in events
+        if event.get("type") in {"focus", "blur", "visible", "hidden"}
+    )
+
+    record = {
+        "_id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "device_id": payload.get("device_id") or payload.get("deviceId") or "web",
+        "session_id": payload.get("session_id") or payload.get("sessionId") or str(uuid.uuid4()),
+        "timestamp": datetime.now(timezone.utc),
+        "data_type": "web",
+        "active_app": payload.get("active_app") or "Web Browser",
+        "app_category": payload.get("app_category") or "MEDIUM",
+        "usage_duration": payload.get("usage_duration") or 1,
+        "session_length_minutes": payload.get("session_length_minutes") or 1,
+        "idle_time_seconds": payload.get("idle_time_seconds") or 0,
+        "keystrokes": payload.get("keystrokes", keystrokes),
+        "mouse_clicks": payload.get("mouse_clicks", mouse_clicks),
+        "mouse_moves": payload.get("mouse_moves", mouse_moves),
+        "app_switches": payload.get("app_switches", focus_events),
+        "time_of_day": payload.get("time_of_day"),
+    }
+
+    try:
         await db.db.usage_data.insert_one(record)
-        inserted += 1
 
-    if inserted > 0 and resolved_user:
-        await run_prediction(resolved_user)
-
-    return {"status": "ok", "records_inserted": inserted}
+        return {"status": "ok", "records_inserted": 1}
+    except PyMongoError as e:
+        print(f"❌ DB write error in legacy activity endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
 
 
 # ---------------- MOBILE DATA ----------------
@@ -176,41 +213,49 @@ async def receive_mobile_usage(data: dict):
         "_id": str(uuid.uuid4()),
         "user_id": user_id,
         "device_id": device_id,
-        "timestamp": datetime.utcnow(),
+        "timestamp": utc_now(),
         "data_type": "mobile",
         "app_name": data.get("app_name"),
         "screen_time": data.get("screen_time"),
         "notifications_received": data.get("notifications_received")
     }
 
-    await db.db.usage_data.insert_one(record)
+    try:
+        await db.db.usage_data.insert_one(record)
 
-    if user_id:
-        await run_prediction(user_id)
+        if user_id:
+            await run_prediction(user_id)
 
-    return {"status": "ok"}
+        return {"status": "ok"}
+    except PyMongoError as e:
+        print(f"❌ DB write error in /mobile: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
 
 
 # ---------------- RUN ML PREDICTION ----------------
 
 async def run_prediction(user_id: str):
 
-    now_utc = datetime.utcnow()
+    now_utc = utc_now()
     recent_cutoff = now_utc - timedelta(minutes=60)
     day_cutoff = now_utc - timedelta(days=1)
 
     # Primary window: recent 60 minutes to make each 10-minute aggregate affect prediction quickly.
-    recent_laptop = await db.db.usage_data.find({
-        "user_id": user_id,
-        "data_type": "laptop",
-        "timestamp": {"$gte": recent_cutoff}
-    }).sort("timestamp", -1).limit(200).to_list(200)
+    try:
+        recent_laptop = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "laptop",
+            "timestamp": {"$gte": recent_cutoff}
+        }).sort("timestamp", -1).limit(200).to_list(200)
 
-    recent_mobile = await db.db.usage_data.find({
-        "user_id": user_id,
-        "data_type": "mobile",
-        "timestamp": {"$gte": recent_cutoff}
-    }).sort("timestamp", -1).limit(200).to_list(200)
+        recent_mobile = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "mobile",
+            "timestamp": {"$gte": recent_cutoff}
+        }).sort("timestamp", -1).limit(200).to_list(200)
+    except PyMongoError as e:
+        print(f"❌ DB read error in run_prediction for user {user_id}: {e}")
+        return
 
     # Fallback to a broader window only when recent data is too sparse.
     if len(recent_laptop) + len(recent_mobile) >= 2:
@@ -218,17 +263,21 @@ async def run_prediction(user_id: str):
         mobile_data = recent_mobile
         prediction_window = "60m"
     else:
-        laptop_data = await db.db.usage_data.find({
-            "user_id": user_id,
-            "data_type": "laptop",
-            "timestamp": {"$gte": day_cutoff}
-        }).sort("timestamp", -1).limit(500).to_list(500)
+        try:
+            laptop_data = await db.db.usage_data.find({
+                "user_id": user_id,
+                "data_type": "laptop",
+                "timestamp": {"$gte": day_cutoff}
+            }).sort("timestamp", -1).limit(500).to_list(500)
 
-        mobile_data = await db.db.usage_data.find({
-            "user_id": user_id,
-            "data_type": "mobile",
-            "timestamp": {"$gte": day_cutoff}
-        }).sort("timestamp", -1).limit(500).to_list(500)
+            mobile_data = await db.db.usage_data.find({
+                "user_id": user_id,
+                "data_type": "mobile",
+                "timestamp": {"$gte": day_cutoff}
+            }).sort("timestamp", -1).limit(500).to_list(500)
+        except PyMongoError as e:
+            print(f"❌ DB read error in run_prediction fallback for user {user_id}: {e}")
+            return
         prediction_window = "24h"
 
     features = feature_extractor.extract_features_from_live_data(
@@ -258,7 +307,7 @@ async def run_prediction(user_id: str):
     prediction_record = {
         "_id": str(uuid.uuid4()),
         "user_id": user_id,
-        "timestamp": datetime.utcnow(),
+        "timestamp": utc_now(),
         "prediction_window": prediction_window,
         "sample_count": len(laptop_data) + len(mobile_data),
         "fatigue_level": fatigue_result["level"],
@@ -280,10 +329,10 @@ async def run_prediction(user_id: str):
 
 # ---------------- DASHBOARD DATA ----------------
 
-@router.get("/user/{user_id}/recent")
+@router.get("/user/{user_id}/recent", responses={503: {"description": "Database unavailable"}})
 async def get_recent_usage(user_id: str, hours: int = 24):
 
-    ist_now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    ist_now = datetime.now(IST)
 
     cutoff = ist_now.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -358,9 +407,9 @@ async def get_recent_usage(user_id: str, hours: int = 24):
 
     total_screen_time = round(total_minutes / 60, 2)
 
-    total_sessions = len(set(
+    total_sessions = len({
         u.get("session_id") for u in laptop if u.get("session_id")
-    ))
+    })
 
     avg_session_length = 0
     if laptop:
@@ -491,11 +540,11 @@ async def get_recent_usage(user_id: str, hours: int = 24):
         "mobile_usage": mobile
     }
 
-@router.get("/user/{user_id}/trends")
+@router.get("/user/{user_id}/trends", responses={503: {"description": "Database unavailable"}})
 async def get_trends(user_id: str, days: int = 7, offset_days: int = 0):
 
     # Use IST timezone to match frontend expectations.
-    ist_now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    ist_now = datetime.now(IST)
     offset_days = max(0, offset_days)
 
     # For days=1, allow requesting an older calendar day window (e.g. yesterday).
@@ -544,7 +593,7 @@ async def get_trends(user_id: str, days: int = 7, offset_days: int = 0):
         time_groups = {}
 
         for p in preds:
-            local_time = p["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist)
+            local_time = p["timestamp"].replace(tzinfo=pytz.utc).astimezone(IST)
             time_label = local_time.strftime("%H:%M")
             
             if time_label not in time_groups:
@@ -572,7 +621,7 @@ async def get_trends(user_id: str, days: int = 7, offset_days: int = 0):
         daily = {}
 
         for p in preds:
-            local_time = p["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist)
+            local_time = p["timestamp"].replace(tzinfo=pytz.utc).astimezone(IST)
             day = local_time.strftime("%Y-%m-%d")
 
             if day not in daily:
@@ -623,7 +672,7 @@ async def get_trends(user_id: str, days: int = 7, offset_days: int = 0):
 async def get_analytics(user_id: str):
     
     # 🔥 Use IST for cutoff to ensure we get all data from last 7 calendar days
-    ist_now = datetime.now(ist)
+    ist_now = datetime.now(IST)
     cutoff_ist = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
     cutoff_utc = cutoff_ist.astimezone(pytz.utc)
 
@@ -650,7 +699,7 @@ async def get_analytics(user_id: str):
         daily_usage[day_date] = 0
 
     for r in filtered:
-        d = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist).date()
+        d = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(IST).date()
         daily_usage[d] += r.get("usage_duration", 0)
 
     # Sort by date (oldest to newest)
@@ -672,7 +721,7 @@ async def get_analytics(user_id: str):
     hourly = defaultdict(int)
 
     for r in filtered:
-        h = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(ist).strftime("%H")
+        h = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(IST).strftime("%H")
         hourly[h] += r.get("usage_duration", 0) 
 
     hourly_data = [{"hour": h, "usage": v} for h, v in sorted(hourly.items())]

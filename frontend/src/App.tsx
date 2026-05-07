@@ -1,5 +1,4 @@
 import { Toaster } from "@/components/ui/toaster";
-import { useActivityLogger } from "@/hooks/useActivityLogger";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -30,9 +29,6 @@ function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
 
 function AppRoutes() {
   const { isAuthenticated, isLoading } = useAuth();
-  // Activity logger must be inside AuthProvider context
-  // so we call it here
-  useActivityLogger();
   if (isLoading) return null;
   return (
     <Routes>

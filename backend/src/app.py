@@ -1,6 +1,20 @@
+import os
+
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from typing import Any
+try:
+    from pymongo.errors import PyMongoError
+except Exception:
+    # If pymongo isn't importable in some environments, fall back to Exception
+    PyMongoError = Exception
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+
+
+API_PREFIX = "/api/v1"
+APP_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
+APP_PORT = int(os.getenv("BACKEND_PORT", "8000"))
 
 
 # ---------------- LIFESPAN EVENTS ----------------
@@ -37,10 +51,10 @@ async def lifespan(app: FastAPI):
     # -------- SHUTDOWN --------
     try:
         from src.database import db
-        await db.disconnect()
+        db.disconnect()
         print("🔌 Database disconnected")
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ Database disconnect warning: {e}")
 
     print("🛑 Backend shutdown complete\n")
 
@@ -75,14 +89,28 @@ from src.routes.pairing import router as pairing_router
 from src.routes.usage import router as usage_router
 from src.routes.prediction import router as prediction_router
 from src.routes.preferences import router as preferences_router
+from src.routes.debug import router as debug_router
 
-app.include_router(auth_router, prefix="/api/v1")
-app.include_router(pairing_router, prefix="/api/v1")
-app.include_router(usage_router, prefix="/api/v1")
-app.include_router(prediction_router, prefix="/api/v1")
-app.include_router(preferences_router, prefix="/api/v1")
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(pairing_router, prefix=API_PREFIX)
+app.include_router(usage_router, prefix=API_PREFIX)
+app.include_router(prediction_router, prefix=API_PREFIX)
+app.include_router(preferences_router, prefix=API_PREFIX)
+app.include_router(debug_router, prefix=API_PREFIX)
 
-print("✅ Routers loaded: auth, pairing, usage, prediction, preferences")
+print("✅ Routers loaded: auth, pairing, usage, prediction, preferences, debug")
+
+
+# ---------------- GLOBAL EXCEPTION HANDLERS ----------------
+@app.exception_handler(PyMongoError)
+async def pymongo_exception_handler(request: Any, exc: PyMongoError):
+    # Return a concise, user-friendly error when database/network issues occur
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database temporarily unavailable. Please check your network or try again later."
+        },
+    )
 
 
 # ---------------- BASIC ROUTES ----------------
@@ -103,13 +131,13 @@ async def health_check():
     try:
         from src.database import db
         db_status = "connected" if db.client else "disconnected"
-    except:
+    except Exception:
         db_status = "unknown"
 
     try:
         from src.services.ml_service import ml_service
         ml_status = "loaded" if ml_service.is_loaded else "fallback"
-    except:
+    except Exception:
         ml_status = "unknown"
 
     return {
@@ -149,8 +177,8 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "src.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=APP_HOST,
+        port=APP_PORT,
         reload=True,
         log_level="info"
     )

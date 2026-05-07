@@ -20,7 +20,7 @@ async def test_connection():
         users = await db.db.users.find().to_list(length=5)
         print(f"Found {len(users)} users in database")
         
-        await db.disconnect()
+        db.disconnect()
         return True
     except Exception as e:
         print(f"❌ Connection failed: {e}")

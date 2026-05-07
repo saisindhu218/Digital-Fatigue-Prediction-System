@@ -59,7 +59,7 @@ async def test_database_connection():
         print(f"\n❌ ERROR: {e}")
         return False
     finally:
-        await db.disconnect()
+        db.disconnect()
 
 if __name__ == "__main__":
     result = asyncio.run(test_database_connection())

@@ -7,6 +7,10 @@ from src.config import settings
 from src.models.user import UserCreate, UserInDB, Token, UserLogin, TokenData, RefreshTokenRequest
 from src.database import db
 import uuid
+try:
+    from pymongo.errors import PyMongoError
+except Exception:
+    PyMongoError = Exception
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -74,7 +78,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     if db.db is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=DATABASE_NOT_CONNECTED)
 
-    user = await db.db.users.find_one({"_id": token_data.user_id})
+    try:
+        user = await db.db.users.find_one({"_id": token_data.user_id})
+    except PyMongoError:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database temporarily unavailable. Please check your network or try again later.")
     if user is None:
         raise credentials_exception
 

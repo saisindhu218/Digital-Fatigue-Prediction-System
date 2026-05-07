@@ -106,27 +106,40 @@ class MLService:
             }
             extracted_features = {key: features.get(key, default) for key, default in feature_defaults.items()}
 
+            # Mouse-move counts can be extremely large on desktop systems.
+            # Cap them before scoring so the behavioral score does not collapse to 0.
+            keystrokes_per_hour = min(float(extracted_features["keystrokes_per_hour"]), 600.0)
+            mouse_per_hour = min(float(extracted_features["mouse_per_hour"]), 1200.0)
+            switches_per_hour = min(float(extracted_features["switches_per_hour"]), 180.0)
+            screen_time = min(float(extracted_features["screen_time"]), 16.0)
+            idle_ratio = min(max(float(extracted_features["idle_ratio"]), 0.0), 1.0)
+            productive_ratio = min(max(float(extracted_features["productive_ratio"]), 0.0), 1.0)
+            night_ratio = min(max(float(extracted_features["night_ratio"]), 0.0), 1.0)
+            cognitive_load = min(max(float(extracted_features["cognitive_load"]), 0.0), 10.0)
+            fatigue_break_bonus = max(float(extracted_features["fatigue_break_bonus"]), -40.0)
+            fatigue_session_penalty = min(max(float(extracted_features["fatigue_session_penalty"]), 0.0), 40.0)
+
             # Adjust idle time weight dynamically
-            idle_weight = 30 if extracted_features["idle_ratio"] < 0.5 else 40
+            idle_weight = 30 if idle_ratio < 0.5 else 40
 
             # Calculate behavioral score
             behavioral_score = (
-                extracted_features["screen_time"] * 10 +
-                extracted_features["idle_ratio"] * idle_weight +
-                extracted_features["switches_per_hour"] * 1.2 +
-                extracted_features["cognitive_load"] * 9 +
-                extracted_features["night_ratio"] * 20 -
-                extracted_features["productive_ratio"] * 18 -
-                (extracted_features["keystrokes_per_hour"] * 0.008) -
-                (extracted_features["mouse_per_hour"] * 0.004) +
-                extracted_features["fatigue_break_bonus"] +
-                extracted_features["fatigue_session_penalty"]
+                screen_time * 10 +
+                idle_ratio * idle_weight +
+                switches_per_hour * 1.2 +
+                cognitive_load * 9 +
+                night_ratio * 20 -
+                productive_ratio * 18 -
+                (keystrokes_per_hour * 0.008) -
+                (mouse_per_hour * 0.004) +
+                fatigue_break_bonus +
+                fatigue_session_penalty
             )
 
             # Boost for high-activity productive sessions
-            if extracted_features["productive_ratio"] > 0.6 and (
-                extracted_features["keystrokes_per_hour"] > 150 or
-                extracted_features["mouse_per_hour"] > 200
+            if productive_ratio > 0.6 and (
+                keystrokes_per_hour > 150 or
+                mouse_per_hour > 200
             ):
                 behavioral_score *= 0.85
 
@@ -134,11 +147,11 @@ class MLService:
 
             if self.is_loaded:
                 X = pd.DataFrame([{
-                    "screen_time": extracted_features["screen_time"],
+                    "screen_time": screen_time,
                     "avg_session": features.get("avg_session", 0),
                     "breaks": features.get("breaks", 0),
-                    "night_ratio": extracted_features["night_ratio"],
-                    "productive_ratio": extracted_features["productive_ratio"]
+                    "night_ratio": night_ratio,
+                    "productive_ratio": productive_ratio
                 }])
 
                 pred = self.fatigue_classifier.predict(X)[0]

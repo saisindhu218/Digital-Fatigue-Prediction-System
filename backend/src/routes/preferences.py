@@ -4,6 +4,7 @@ from src.models.user import (
     Notification, NotificationResponse
 )
 from src.database import db
+from pymongo.errors import PyMongoError
 from src.routes.auth import get_current_user
 from src.services.notification_service import notification_service
 from datetime import datetime, timedelta
@@ -34,18 +35,22 @@ async def _generate_real_data_demo_notifications(user: dict) -> List[dict]:
     goals = user.get("goals", {})
 
     now = datetime.utcnow()
-    latest_prediction = await db.db.predictions.find_one(
-        {"user_id": user_id},
-        sort=[("timestamp", -1)]
-    )
+    try:
+        latest_prediction = await db.db.predictions.find_one(
+            {"user_id": user_id},
+            sort=[("timestamp", -1)]
+        )
 
-    if not latest_prediction:
+        if not latest_prediction:
+            return []
+
+        latest_usage = await db.db.usage_data.find_one(
+            {"user_id": user_id, "data_type": "laptop"},
+            sort=[("timestamp", -1)]
+        )
+    except PyMongoError as e:
+        print(f"❌ DB error in _generate_real_data_demo_notifications for user {user_id}: {e}")
         return []
-
-    latest_usage = await db.db.usage_data.find_one(
-        {"user_id": user_id, "data_type": "laptop"},
-        sort=[("timestamp", -1)]
-    )
 
     generated: List[dict] = []
 
@@ -80,19 +85,22 @@ async def _generate_real_data_demo_notifications(user: dict) -> List[dict]:
         )
 
     if len(generated) < 3 and notification_service.should_send_notification(preferences, "weekly_digest"):
-        week_cutoff = now - timedelta(days=7)
-        recent_prediction_count = await db.db.predictions.count_documents({
-            "user_id": user_id,
-            "timestamp": {"$gte": week_cutoff}
-        })
-        generated.append(
-            notification_service.generate_weekly_digest(
-                break_count=0,
-                fatigue_alerts=1 if fatigue_score >= 70 else 0,
-                predictions_made=int(recent_prediction_count),
-                insights="Check analytics to review your week-over-week trend."
+        try:
+            week_cutoff = now - timedelta(days=7)
+            recent_prediction_count = await db.db.predictions.count_documents({
+                "user_id": user_id,
+                "timestamp": {"$gte": week_cutoff}
+            })
+            generated.append(
+                notification_service.generate_weekly_digest(
+                    break_count=0,
+                    fatigue_alerts=1 if fatigue_score >= 70 else 0,
+                    predictions_made=int(recent_prediction_count),
+                    insights="Check analytics to review your week-over-week trend."
+                )
             )
-        )
+        except PyMongoError as e:
+            print(f"❌ DB error counting predictions for weekly digest for user {user_id}: {e}")
 
     return generated[:3]
 
@@ -118,6 +126,9 @@ async def get_user_preferences(current_user: dict = Depends(get_current_user)):
         return UserPreferences(**preferences)
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in get_user_preferences: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching preferences: {str(e)}")
 
@@ -147,14 +158,21 @@ async def update_user_preferences(
         updated_prefs = {**current_prefs, **update_data}
         
         # Save to database
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"preferences": updated_prefs}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"preferences": updated_prefs}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error updating preferences for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return UserPreferences(**updated_prefs)
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in update_user_preferences: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating preferences: {str(e)}")
 
@@ -181,6 +199,9 @@ async def get_user_goals(current_user: dict = Depends(get_current_user)):
         return UserGoals(**goals)
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in get_user_goals: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching goals: {str(e)}")
 
@@ -211,14 +232,21 @@ async def update_user_goals(
         updated_goals = {**current_goals, **update_data}
         
         # Save to database
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"goals": updated_goals}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"goals": updated_goals}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error updating goals for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return UserGoals(**updated_goals)
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in update_user_goals: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating goals: {str(e)}")
 
@@ -243,13 +271,19 @@ async def get_notifications(
 
         # Seed 2-3 meaningful notifications from real data for first-time/demo users.
         if len(notifications) == 0:
-            seeded_notifications = await _generate_real_data_demo_notifications(user)
-            if seeded_notifications:
-                notifications = seeded_notifications
-                await db.db.users.update_one(
-                    {"_id": current_user["user_id"]},
-                    {"$set": {"notifications": notifications}}
-                )
+            try:
+                seeded_notifications = await _generate_real_data_demo_notifications(user)
+                if seeded_notifications:
+                    notifications = seeded_notifications
+                    try:
+                        await db.db.users.update_one(
+                            {"_id": current_user["user_id"]},
+                            {"$set": {"notifications": notifications}}
+                        )
+                    except PyMongoError as e:
+                        print(f"❌ DB write error seeding notifications for user {current_user['user_id']}: {e}")
+            except PyMongoError as e:
+                print(f"❌ DB error when generating demo notifications for user {current_user['user_id']}: {e}")
         
         # Filter unread if requested
         if unread_only:
@@ -265,6 +299,9 @@ async def get_notifications(
         return [NotificationResponse(**n) for n in notifications]
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in get_notifications: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching notifications: {str(e)}")
 
@@ -285,6 +322,9 @@ async def get_unread_notification_count(current_user: dict = Depends(get_current
         return {"unread_count": unread_count}
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in get_unread_notification_count: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching unread count: {str(e)}")
 
@@ -313,14 +353,21 @@ async def mark_notification_as_read(
         if not found:
             raise HTTPException(status_code=404, detail="Notification not found")
         
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"notifications": notifications}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"notifications": notifications}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error marking notification read for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return {"message": "Notification marked as read"}
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in mark_notification_as_read: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating notification: {str(e)}")
 
@@ -339,14 +386,21 @@ async def mark_all_notifications_as_read(current_user: dict = Depends(get_curren
         for notif in notifications:
             notif["is_read"] = True
         
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"notifications": notifications}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"notifications": notifications}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error marking all notifications read for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return {"message": "All notifications marked as read"}
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in mark_all_notifications_as_read: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating notifications: {str(e)}")
 
@@ -370,14 +424,21 @@ async def delete_notification(
         if len(new_notifications) == len(notifications):
             raise HTTPException(status_code=404, detail="Notification not found")
         
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"notifications": new_notifications}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"notifications": new_notifications}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error deleting notification for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return {"message": "Notification deleted"}
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in delete_notification: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting notification: {str(e)}")
 
@@ -388,12 +449,21 @@ async def delete_all_notifications(current_user: dict = Depends(get_current_user
         raise HTTPException(status_code=503, detail="Database not connected")
     
     try:
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"notifications": []}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"notifications": []}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error deleting all notifications for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return {"message": "All notifications deleted"}
+    except HTTPException:
+        raise
+    except PyMongoError as e:
+        print(f"❌ DB error in delete_all_notifications: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting notifications: {str(e)}")
 
@@ -418,13 +488,20 @@ async def create_notification(
         # Keep only last 100 notifications
         notifications = notifications[-100:]
         
-        await db.db.users.update_one(
-            {"_id": current_user["user_id"]},
-            {"$set": {"notifications": notifications}}
-        )
+        try:
+            await db.db.users.update_one(
+                {"_id": current_user["user_id"]},
+                {"$set": {"notifications": notifications}}
+            )
+        except PyMongoError as e:
+            print(f"❌ DB write error creating notification for user {current_user['user_id']}: {e}")
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
         
         return NotificationResponse(**notification_dict)
     except HTTPException:
         raise
+    except PyMongoError as e:
+        print(f"❌ DB error in create_notification: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating notification: {str(e)}")

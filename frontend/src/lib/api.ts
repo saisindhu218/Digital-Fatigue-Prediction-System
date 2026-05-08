@@ -1,6 +1,7 @@
 import { AuthResponse, UsageResponse } from "./types";
 
 const API_BASE_URL = "http://localhost:8000/api/v1";
+let refreshInFlight: Promise<AuthResponse | null> | null = null;
 
 function getToken(): string | null {
   return localStorage.getItem("auth_token");
@@ -95,6 +96,16 @@ async function refreshAuthSession(): Promise<AuthResponse | null> {
   return result;
 }
 
+async function refreshAuthSessionOnce(): Promise<AuthResponse | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshAuthSession().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+
+  return refreshInFlight;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
 
@@ -106,7 +117,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   });
 
   if (response.status === 401 && shouldTryRefresh(endpoint)) {
-    const renewed = await refreshAuthSession();
+    const renewed = await refreshAuthSessionOnce();
 
     if (renewed?.access_token) {
       const retryHeaders = buildRequestHeaders(renewed.access_token, options.headers);

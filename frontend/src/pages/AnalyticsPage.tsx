@@ -170,15 +170,50 @@ export default function AnalyticsPage() {
 
   /* ---------------- DAILY USAGE ---------------- */
 
-  const dailyUsage = (analytics.daily ?? [])
-    .map((d: any, index: number) => {
-      return {
-        date: String(d.date || ''),
-        usage: (d.usage || 0) / 60,
-        order: index,
-      };
-    })
-    .sort((a: any, b: any) => a.order - b.order);
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const tomorrowIstKey = getIstDateKey(tomorrow);
+  const tomorrowIstLabel = getIstDayLabel(tomorrow);
+
+  const getMobileDummyHours = (dayKey: string, dayLabel: string): number => {
+    if (dayKey === tomorrowIstKey || dayLabel === tomorrowIstLabel) {
+      return 3 + (10 / 60); // 3 hr 10 min only for tomorrow
+    }
+
+    // Deterministic 4-8 hr range so values stay stable per day but shift as days roll.
+    const hash = dayKey.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    return 4 + (hash % 9) * 0.5;
+  };
+
+  const dailyUsageFromAnalytics = (analytics.daily ?? []).map((d: any, index: number) => {
+    const rawLabel = String(d.date || '').trim();
+    const parsed = new Date(rawLabel);
+    const dayKey = Number.isNaN(parsed.getTime())
+      ? ''
+      : getIstDateKey(parsed);
+    const dayLabel = Number.isNaN(parsed.getTime())
+      ? rawLabel
+      : getIstDayLabel(parsed);
+
+    return {
+      date: rawLabel || dayLabel,
+      usage: Number(d.usage || 0) / 60,
+      mobile: getMobileDummyHours(dayKey, dayLabel || rawLabel),
+      order: index,
+    };
+  });
+
+  const dailyUsage = dailyUsageFromAnalytics.length > 0
+    ? dailyUsageFromAnalytics
+    : last7IstDayKeys.map((dayKey, index) => {
+        const dayDate = new Date(now.getTime() - (6 - index) * 24 * 60 * 60 * 1000);
+        const dayLabel = getIstDayLabel(dayDate);
+        return {
+          date: dayLabel,
+          usage: 0,
+          mobile: getMobileDummyHours(dayKey, dayLabel),
+          order: index,
+        };
+      });
 
   /* ---------------- WEEKLY TREND ---------------- */
 
@@ -300,7 +335,8 @@ export default function AnalyticsPage() {
                   return `${h} hr ${m} min`;
                 }}
               />
-              <Bar dataKey="usage" fill="hsl(250,80%,65%)" radius={[3, 3, 0, 0]} name="Hours" />
+              <Bar dataKey="usage" fill="hsl(145,65%,48%)" radius={[3, 3, 0, 0]} name="Laptop" />
+              <Bar dataKey="mobile" fill="hsl(250,80%,65%)" radius={[3, 3, 0, 0]} name="Mobile" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

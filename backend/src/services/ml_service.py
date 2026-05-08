@@ -86,6 +86,13 @@ class MLService:
             return "LOW"
         return "MEDIUM"
 
+    def _smooth_fatigue_score(self, raw_score: float) -> float:
+        """
+        Keep the output away from hard 0/100 edges so the score changes naturally.
+        """
+        bounded_score = max(0.0, min(100.0, float(raw_score)))
+        return 5.0 + 90.0 * (1.0 / (1.0 + np.exp(-((bounded_score - 50.0) / 10.0))))
+
     def predict_fatigue(self, features: dict):
         """
         Refined fatigue prediction logic with dynamic adjustments.
@@ -119,31 +126,26 @@ class MLService:
             fatigue_break_bonus = max(float(extracted_features["fatigue_break_bonus"]), -40.0)
             fatigue_session_penalty = min(max(float(extracted_features["fatigue_session_penalty"]), 0.0), 40.0)
 
-            # Adjust idle time weight dynamically
-            idle_weight = 30 if idle_ratio < 0.5 else 40
-
-            # Calculate behavioral score
-            behavioral_score = (
-                screen_time * 10 +
-                idle_ratio * idle_weight +
-                switches_per_hour * 1.2 +
-                cognitive_load * 9 +
-                night_ratio * 20 -
-                productive_ratio * 18 -
-                (keystrokes_per_hour * 0.008) -
-                (mouse_per_hour * 0.004) +
-                fatigue_break_bonus +
-                fatigue_session_penalty
+            # Convert the raw conditions into a smoother 0-100 fatigue pressure score.
+            activity_pressure = (
+                min(screen_time / 16.0, 1.0) * 18.0 +
+                idle_ratio * 24.0 +
+                min(switches_per_hour / 60.0, 1.0) * 14.0 +
+                (cognitive_load / 10.0) * 16.0 +
+                night_ratio * 14.0 +
+                min(keystrokes_per_hour / 250.0, 1.0) * 6.0 +
+                min(mouse_per_hour / 500.0, 1.0) * 4.0 +
+                min(fatigue_session_penalty / 8.0, 5.0)
             )
 
-            # Boost for high-activity productive sessions
-            if productive_ratio > 0.6 and (
-                keystrokes_per_hour > 150 or
-                mouse_per_hour > 200
-            ):
-                behavioral_score *= 0.85
+            recovery = (
+                productive_ratio * 22.0 +
+                min(max(-fatigue_break_bonus, 0.0) / 8.0, 5.0) * 1.5
+            )
 
-            behavioral_score = max(0, min(100, behavioral_score))
+            behavioral_score = 35.0 + activity_pressure - recovery
+            behavioral_score = max(0.0, min(100.0, behavioral_score))
+            smooth_score = self._smooth_fatigue_score(behavioral_score)
 
             if self.is_loaded:
                 X = pd.DataFrame([{
@@ -163,13 +165,13 @@ class MLService:
                     else 0.85
                 )
 
-                score = behavioral_score * {
+                score = smooth_score * {
                     "Low": 0.5,
                     "Medium": 0.8
                 }.get(label, 1)
 
             else:
-                score = behavioral_score
+                score = smooth_score
                 confidence = 0.82
                 label = (
                     "Low" if score < 35 else

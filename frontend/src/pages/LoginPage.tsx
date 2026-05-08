@@ -7,8 +7,12 @@ import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-export default function LoginPage() {
-  const [isLogin, setIsLogin] = useState(true);
+interface LoginPageProps {
+  initialMode?: 'login' | 'signup';
+}
+
+export default function LoginPage({ initialMode = 'login' }: LoginPageProps) {
+  const [isLogin, setIsLogin] = useState(initialMode === 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');

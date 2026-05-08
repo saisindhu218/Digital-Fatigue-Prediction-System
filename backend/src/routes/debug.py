@@ -81,10 +81,10 @@ async def fatigue_diagnostic(user_id: str):
                 "stage_4_calculated_fatigue": fatigue_result,
                 "stage_5_stored_prediction": latest_prediction,
                 "summary": {
-                    "✅_Has_Activity_Data": laptop_count + mobile_count > 0,
-                    "✅_Features_Extractable": len(features) > 0,
-                    "✅_Fatigue_Score_Calculated": fatigue_result.get("score", 0) > 0,
-                    "✅_Prediction_Stored_In_DB": latest_prediction is not None
+                    "_Has_Activity_Data": laptop_count + mobile_count > 0,
+                    "_Features_Extractable": len(features) > 0,
+                    "_Fatigue_Score_Calculated": fatigue_result.get("score", 0) > 0,
+                    "_Prediction_Stored_In_DB": latest_prediction is not None
                 }
             }
         }

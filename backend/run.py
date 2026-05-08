@@ -139,12 +139,13 @@ def main():
     print("=" * 60)
 
     try:
+        print("Starting Uvicorn server...")
+
         uvicorn.run(
-            "src.app:app",
+            app="src.app:app",
             host="0.0.0.0",
             port=int(os.environ.get("PORT", 8000)),
-            reload=False,
-            log_level="info"
+            reload=False
         )
     except Exception as e:
         print("Server failed:", e)

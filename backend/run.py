@@ -139,6 +139,13 @@ def main():
     print("=" * 60)
 
     try:
+
+        print("Import test starting...")
+
+        from src.app import app
+
+        print("FastAPI app imported successfully")
+        
         print("Starting Uvicorn server...")
 
         uvicorn.run(
@@ -148,9 +155,9 @@ def main():
             reload=False
         )
     except Exception as e:
-        print("Server failed:", e)
-
-      
+        import traceback
+        print("Server failed:")
+        traceback.print_exc()  
 
 # ==============================
 # AUTO FREE PORT (PERMANENT FIX)

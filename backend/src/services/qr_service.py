@@ -4,7 +4,7 @@ import base64
 from datetime import datetime, timedelta
 import secrets
 import socket
-from config import settings
+from src.config import settings
 
 
 def get_local_ip():

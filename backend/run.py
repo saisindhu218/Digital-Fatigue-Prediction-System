@@ -37,8 +37,7 @@ def check_requirements():
     if env_path.exists():
         print(f"OK .env file found: {env_path}")
     else:
-        print("ERROR .env file missing")
-        return False
+        print("Using Render environment variables")
 
     ml_models_path = BASE_DIR / "ml_models"
     if ml_models_path.exists():
@@ -128,10 +127,11 @@ def main():
 
 
 # ✅ CORRECT PLACE
-    free_port(8000)
+    if os.name == "nt":
+        free_port(8000)
 
-    start_activity_logger()
-    
+    if os.name == "nt":
+        start_activity_logger()
     
     print("\nStarting FastAPI server...")
     print("API Docs: http://localhost:8000/docs")
@@ -142,7 +142,7 @@ def main():
         uvicorn.run(
             "src.app:app",
             host="0.0.0.0",
-            port=8000,
+            port=int(os.environ.get("PORT", 8000)),
             reload=False,
             log_level="info"
         )

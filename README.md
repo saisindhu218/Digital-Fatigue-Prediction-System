@@ -247,9 +247,9 @@ flutter run
 
 
 ## Academic Information
-**Project Title:** AI-Based Digital Fatigue & Productivity Risk Prediction System
-**Course:** Master of Computer Applications (MCA)
-**Semester:** IV Semester Major Project
+* **Project Title:** AI-Based Digital Fatigue & Productivity Risk Prediction System
+* **Course:** Master of Computer Applications (MCA)
+* **Semester:** IV Semester Major Project
 
 
 

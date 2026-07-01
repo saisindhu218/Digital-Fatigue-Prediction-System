@@ -219,7 +219,7 @@ flutter run
 
 | User Profile |  Mobile Login |
 |------------------|-------------------|
-| <img src="https://github.com/user-attachments/assets/f8a3bafd-9731-42ec-8ed9-296c6efda9c7" width="100%"> | <img src="https://github.com/user-attachments/assets/a3b2a1f5-64ae-405d-8ac0-9aacf81663ee" width="70%"> |
+| <img src="https://github.com/user-attachments/assets/f8a3bafd-9731-42ec-8ed9-296c6efda9c7" width="100%"> | <img width="356" height="639" alt="Image" src="https://github.com/user-attachments/assets/e029d0d1-b325-4a1f-8526-cfbb2265a6c6" width="100%" /> |
 
 <br>
 

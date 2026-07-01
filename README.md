@@ -248,7 +248,7 @@ flutter run
 
 ## Academic Information
 * **Project Title:** AI-Based Digital Fatigue & Productivity Risk Prediction System
-* **Course:** Master of Computer Applications (MCA)
+* **Course:** Master of Computer Applications (MCA), Jain (Deemed-to-be)University, Jayanagar, Banglore
 * **Semester:** IV Semester Major Project
 
 

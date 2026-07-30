@@ -213,7 +213,7 @@ export default function DevicePairingPage() {
     const id = (device?.device_id || '').toLowerCase();
     const hasTestMarker = /test|sample|mock|demo/.test(name) || /test|sample|mock|demo/.test(id);
 
-    return device?.status === 'connected' && !hasTestMarker;
+    return !hasTestMarker;
   });
 
   return (

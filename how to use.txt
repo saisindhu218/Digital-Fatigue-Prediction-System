@@ -1,0 +1,9 @@
+frontend 
+
+cd frontend
+npm run dev
+
+backend
+cd backend
+.venv\Scripts\Activate.ps1  or this  (Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& "e:\Major Project College\fatigue-prodcutivity-major project\.venv\Scripts\Activate.ps1")
+python run.py

@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { useEffect, useState } from 'react';
 import { useUsageData } from '@/hooks/useUsageData';
 
-const API_BASE = "http://localhost:8000/api/v1";
+const API_BASE =
+  "https://digital-fatigue-prediction-system.onrender.com/api/v1";
 
 function formatISTDateTime(value?: string | null): string {
   if (!value) return 'Never';

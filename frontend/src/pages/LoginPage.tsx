@@ -40,7 +40,7 @@ export default function LoginPage({ initialMode = 'login' }: LoginPageProps) {
   const userId = localStorage.getItem("user_id");
 
   if (userId) {
-    await fetch("http://localhost:8000/api/v1/pairing/save-user", {
+    await fetch(`${import.meta.env.VITE_API_BASE_URL}/pairing/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

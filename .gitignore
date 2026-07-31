@@ -1,0 +1,34 @@
+# Python virtual environments (these should NEVER be committed - they
+# were accidentally committed before at 700+ MB combined, which is why
+# a plain `git clone` of this repo took forever and pulled in someone
+# else's Windows-specific compiled packages)
+.venv/
+venv/
+env/
+**/__pycache__/
+*.pyc
+
+# Desktop agent local build output / packaged state
+desktop-agent/dist/
+desktop-agent/build/
+desktop-agent/*.spec
+
+# Runtime/local-only artifacts (per-machine, not project source)
+active_user.txt
+collector.lock
+backend/active_user.txt
+backend/collector.lock
+backend/src/laptop_collector/device_id.txt
+backend/src/laptop_collector/minute_activity_buffer.json
+
+# JVM crash logs that ended up committed by accident
+hs_err_pid*.log
+replay_pid*.log
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# Env files with secrets
+.env

@@ -1,7 +1,7 @@
 import { AuthResponse, UsageResponse } from "./types";
 
 const API_BASE_URL =
-  "https://digital-fatigue-prediction-system.onrender.com/api/v1";
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
 
 let refreshInFlight: Promise<AuthResponse | null> | null = null;
 

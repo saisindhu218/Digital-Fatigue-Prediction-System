@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: digital-fatigue-guard-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    healthCheckPath: /health
+    envVars:
+      # Set the real values for these in the Render dashboard
+      # (Environment tab) -- do NOT put real secrets in this file, since
+      # it's committed to git.
+      - key: MONGODB_URL
+        sync: false
+      - key: DATABASE_NAME
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "20"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "30"
+      - key: QR_CODE_EXPIRY_MINUTES
+        value: "5"
+      - key: FATIGUE_HIGH_THRESHOLD
+        value: "70"
+      - key: PRODUCTIVITY_LOSS_THRESHOLD
+        value: "10"
+      - key: DEBUG_MODE
+        value: "false"
+      - key: USAGE_DATA_RETENTION_DAYS
+        value: "10"
+      - key: PREDICTIONS_RETENTION_DAYS
+        value: "10"
+      # REQUIRED for mobile QR pairing to work once deployed -- set this
+      # to this exact Render service's public URL after first deploy
+      # (e.g. https://digital-fatigue-guard-backend.onrender.com).
+      # Without it, QR codes embed a useless local WiFi IP instead.
+      - key: BACKEND_PUBLIC_URL
+        sync: false

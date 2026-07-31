@@ -1,4 +1,5 @@
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import OperationFailure
 from src.config import settings
 
 
@@ -64,17 +65,50 @@ class Database:
             # USAGE DATA COLLECTION
             await self.db.usage_data.create_index("user_id")
             await self.db.usage_data.create_index("device_id")
-            await self.db.usage_data.create_index("timestamp")
+            await self._ensure_ttl_index(
+                "usage_data", "timestamp", settings.USAGE_DATA_RETENTION_DAYS
+            )
 
             # PREDICTIONS COLLECTION
             await self.db.predictions.create_index("user_id")
-            await self.db.predictions.create_index("timestamp")
+            await self._ensure_ttl_index(
+                "predictions", "timestamp", settings.PREDICTIONS_RETENTION_DAYS
+            )
 
-            print("✅ Indexes created successfully")
+            print(
+                f"✅ Indexes created successfully "
+                f"(usage_data/predictions auto-expire after "
+                f"{settings.USAGE_DATA_RETENTION_DAYS}d)"
+            )
 
         except Exception as e:
 
             print(f"⚠️ Index initialization warning: {e}")
+
+    async def _ensure_ttl_index(self, collection_name: str, field: str, retention_days: int):
+        """Creates (or fixes) a TTL index on `field` so documents older
+        than `retention_days` are automatically deleted by MongoDB --
+        no cron job or app code needed. If a plain (non-TTL) index on the
+        same field already exists from before, MongoDB refuses to create
+        a second index with different options on the same key, so we
+        detect that conflict and swap it out for the TTL version."""
+
+        collection = self.db[collection_name]
+        expire_seconds = retention_days * 24 * 60 * 60
+
+        try:
+            await collection.create_index(field, expireAfterSeconds=expire_seconds)
+        except OperationFailure as e:
+            # code 85 = IndexOptionsConflict, code 86 = IndexKeySpecsConflict
+            if getattr(e, "code", None) in (85, 86):
+                old_index_name = f"{field}_1"
+                try:
+                    await collection.drop_index(old_index_name)
+                except OperationFailure:
+                    pass
+                await collection.create_index(field, expireAfterSeconds=expire_seconds)
+            else:
+                raise
 
     def disconnect(self):
 

@@ -30,10 +30,18 @@ class QRService:
             minutes=settings.QR_CODE_EXPIRY_MINUTES
         )
 
-        # 🔥 Dynamic IP (no manual change needed)
-        local_ip = get_local_ip()
+        # In production, QR codes must point at the deployed backend's
+        # public URL -- not this machine's local WiFi IP, which is
+        # unreachable from outside the network the server happens to be
+        # running on. Set BACKEND_PUBLIC_URL in production; only fall
+        # back to LAN-IP detection for local dev/testing.
+        if settings.BACKEND_PUBLIC_URL:
+            base_url = settings.BACKEND_PUBLIC_URL
+        else:
+            local_ip = get_local_ip()
+            base_url = f"http://{local_ip}:8000"
 
-        qr_data = f"http://{local_ip}:8000/api/v1/pairing/scan?token={token}"
+        qr_data = f"{base_url}/api/v1/pairing/scan?token={token}"
 
         # Create QR code
         qr = qrcode.QRCode(

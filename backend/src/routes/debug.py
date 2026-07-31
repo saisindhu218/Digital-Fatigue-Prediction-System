@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from src.database import db
 from src.services.feature_extractor import LiveFeatureExtractor
 from src.services.ml_service import ml_service
+from src.config import settings
 from datetime import datetime, timedelta
 import pytz
 
@@ -14,10 +15,20 @@ router = APIRouter(prefix="/debug", tags=["debug"])
 IST = pytz.timezone('Asia/Kolkata')
 feature_extractor = LiveFeatureExtractor()
 
+
+def _require_debug_mode():
+    """These diagnostic endpoints have no authentication and can return
+    other users' raw activity/prediction data -- must stay off on a
+    public deploy unless DEBUG_MODE=true is explicitly set."""
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 @router.get("/fatigue-diagnostic/{user_id}")
 async def fatigue_diagnostic(user_id: str):
     """Check each stage of the fatigue calculation pipeline"""
-    
+    _require_debug_mode()
+
     try:
         ist_now = datetime.now(IST)
         cutoff = ist_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -95,6 +106,8 @@ async def fatigue_diagnostic(user_id: str):
 @router.get("/all-diagnostics")
 async def all_diagnostics():
     """Check diagnostic info for all users and show recent activity"""
+    _require_debug_mode()
+
     try:
         # Get all users
         all_users = await db.db.users.find({}).to_list(None)

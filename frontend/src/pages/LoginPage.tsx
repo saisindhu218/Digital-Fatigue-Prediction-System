@@ -7,6 +7,8 @@ import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
+
 interface LoginPageProps {
   initialMode?: 'login' | 'signup';
 }
@@ -40,7 +42,7 @@ export default function LoginPage({ initialMode = 'login' }: LoginPageProps) {
   const userId = localStorage.getItem("user_id");
 
   if (userId) {
-    await fetch(`${import.meta.env.VITE_API_BASE_URL}/pairing/login`, {
+    await fetch(`${API_BASE}/pairing/save-user`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

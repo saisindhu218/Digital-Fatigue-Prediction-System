@@ -240,7 +240,11 @@ async def refresh_token(payload: RefreshTokenRequest):
 # ========== DEBUG - Check users ==========
 @router.get("/debug")
 async def debug_users():
-    """List all users (debug only)"""
+    """List all users (debug only). Disabled unless DEBUG_MODE=true --
+    this has no authentication, so it must stay off on a public deploy."""
+    if not settings.DEBUG_MODE:
+        raise HTTPException(status_code=404, detail="Not found")
+
     if db.db is None:
         return {"error": "Database not connected"}
     

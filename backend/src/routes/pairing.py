@@ -18,6 +18,16 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def _as_aware_utc(dt):
+    """MongoDB/Motor returns naive datetimes by default even though we
+    always write timezone-aware UTC ones -- comparing an aware utc_now()
+    against a naive value read back from the DB raises 'can't compare
+    offset-naive and offset-aware datetimes'. Normalize before comparing."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # store active user in memory
 ACTIVE_USER = {"user_id": None}
 
@@ -148,7 +158,7 @@ async def generate_qr_code(device_data: DeviceCreate):
             "created_at": utc_now()
         })
 
-        print("QR DATA:", qr_data)
+        print(f"QR generated for device {device_id} (token={qr_data['token'][:6]}...)")
 
         
         return {
@@ -172,7 +182,7 @@ async def verify_pairing(token: str, scanning_device_id: str):
         if not qr_token:
             raise HTTPException(status_code=404, detail="Invalid QR token")
 
-        if utc_now() > qr_token["expires_at"]:
+        if utc_now() > _as_aware_utc(qr_token["expires_at"]):
 
             await db.db.qr_tokens.delete_one({"_id": qr_token["_id"]})
 
@@ -423,7 +433,7 @@ async def scan_qr(token: str, request: Request):
         if not qr_token:
             return "<h2>❌ Invalid QR</h2>"
 
-        if utc_now() > qr_token["expires_at"]:
+        if utc_now() > _as_aware_utc(qr_token["expires_at"]):
             return "<h2>⏰ QR Expired</h2>"
     except PyMongoError as e:
         print(f"❌ DB error in scan_qr: {e}")
@@ -597,6 +607,113 @@ async def confirm_device(data: dict):
     except PyMongoError as e:
         print(f"❌ DB error in confirm_device: {e}")
         raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
+
+# ---------------- AGENT HEARTBEAT ----------------
+# Called every ~30-60s by the desktop agent while it's running in the
+# background. This gives a much simpler and more reliable "connected"
+# signal than inferring status purely from recent usage_data timestamps.
+
+HEARTBEAT_STALE_SECONDS = 90  # no heartbeat in this window => considered offline
+
+
+@router.post("/heartbeat", responses={400: {"description": "device_id and user_id required"}})
+async def agent_heartbeat(data: dict):
+
+    device_id = data.get("device_id")
+    user_id = data.get("user_id")
+    device_name = data.get("device_name")
+    device_type = data.get("device_type", "laptop")
+    hostname = data.get("hostname")
+    agent_version = data.get("agent_version")
+
+    if not device_id or not user_id:
+        raise HTTPException(status_code=400, detail="device_id and user_id required")
+
+    now = utc_now()
+
+    update_fields = {
+        "user_id": user_id,
+        "device_type": device_type,
+        "last_heartbeat": now,
+        "last_active": now,
+        "status": "connected",
+        "pairing_status": DevicePairingStatus.PAIRED,
+    }
+
+    if device_name:
+        update_fields["device_name"] = device_name
+    if hostname:
+        update_fields["hostname"] = hostname
+    if agent_version:
+        update_fields["agent_version"] = agent_version
+
+    try:
+        result = await db.db.devices.update_one(
+            {"device_id": device_id},
+            {
+                "$set": update_fields,
+                "$setOnInsert": {
+                    "_id": str(uuid.uuid4()),
+                    "paired_at": now,
+                },
+            },
+            upsert=True,
+        )
+    except PyMongoError as e:
+        print(f"❌ DB error in agent_heartbeat: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
+
+    return {
+        "message": "heartbeat received",
+        "device_id": device_id,
+        "server_time": now.isoformat(),
+    }
+
+
+# ---------------- LIVE AGENT STATUS (for dashboard) ----------------
+# Lightweight endpoint the frontend can poll to know if the desktop
+# agent is currently online, based purely on heartbeat recency.
+
+@router.get("/agent-status")
+async def agent_status(user_id: str):
+
+    if not user_id:
+        return {"devices": []}
+
+    cutoff = utc_now() - timedelta(seconds=HEARTBEAT_STALE_SECONDS)
+
+    try:
+        devices_cursor = db.db.devices.find({"user_id": user_id})
+        devices = await devices_cursor.to_list(length=None)
+    except PyMongoError as e:
+        print(f"❌ DB error in agent_status: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
+
+    results = []
+    for device in devices:
+        if is_test_device_record(device_id=device.get("device_id"), device_name=device.get("device_name")):
+            continue
+
+        last_heartbeat = device.get("last_heartbeat")
+        online = False
+        if last_heartbeat:
+            hb = last_heartbeat
+            if hb.tzinfo is None:
+                hb = hb.replace(tzinfo=timezone.utc)
+            online = hb >= cutoff
+
+        results.append({
+            "device_id": device.get("device_id"),
+            "device_name": device.get("device_name") or device.get("device_id"),
+            "device_type": device.get("device_type", "unknown"),
+            "hostname": device.get("hostname"),
+            "agent_version": device.get("agent_version"),
+            "online": online,
+            "last_heartbeat": last_heartbeat.isoformat() if last_heartbeat else None,
+        })
+
+    return {"devices": results}
+
 
 @router.post("/disconnect", responses={404: {"description": "Device not found"}})
 async def disconnect_device(device_id: str):

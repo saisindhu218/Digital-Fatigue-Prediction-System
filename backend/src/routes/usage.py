@@ -25,6 +25,9 @@ def utc_now():
 # ---------------- HELPER ----------------
 
 async def resolve_user(device_id: str):
+    """Looks up which user a device belongs to. Returns None if unknown
+    -- callers must then reject the request rather than guess, since this
+    app can have multiple real users once deployed."""
 
     try:
         device = await db.db.devices.find_one({"device_id": device_id})
@@ -32,24 +35,13 @@ async def resolve_user(device_id: str):
         if device and device.get("user_id"):
             return device.get("user_id")
 
-        # 🔥 AUTO-FIX: get user from latest login/session
-        user = await db.db.users.find_one({}, sort=[("created_at", -1)])
-
-        if user:
-            user_id = user.get("_id")
-
-            # save mapping automatically
-            await db.db.devices.insert_one({
-                "device_id": device_id,
-                "user_id": user_id,
-                "linked_at": utc_now()
-            })
-
-            print(f"✅ Device mapped automatically: {device_id} → {user_id}")
-
-            return user_id
-
-        print("❌ No user found")
+        # NOTE: this used to fall back to "whichever user account was
+        # created most recently in the whole database" when a device_id
+        # wasn't registered. That's safe ONLY with exactly one user ever
+        # testing the app -- on a real multi-user deployment it silently
+        # attributes one person's activity data to a DIFFERENT random
+        # account. Removed. An unregistered device with no explicit
+        # user_id in the payload is now rejected by the caller instead.
         return None
     except PyMongoError as e:
         print(f"❌ DB error in resolve_user: {e}")
@@ -58,11 +50,17 @@ async def resolve_user(device_id: str):
 
 # ---------------- LAPTOP DATA ----------------
 
-@router.post("/laptop")
+@router.post("/laptop", responses={400: {"description": "Unknown device and no user_id provided"}})
 async def receive_laptop_usage(data: dict):
 
     device_id = data.get("device_id")
     user_id = data.get("user_id") or await resolve_user(device_id)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown device and no user_id provided -- pair this device first."
+        )
 
     record = {
         "_id": str(uuid.uuid4()),
@@ -108,6 +106,10 @@ async def receive_laptop_batch(payload: dict):
 
         device_id = r.get("device_id")
         user_id = r.get("user_id") or await resolve_user(device_id)
+
+        if not user_id:
+            print(f"⚠️ Skipping batch record: unknown device {device_id} with no user_id")
+            continue
 
         resolved_user = user_id
 
@@ -203,12 +205,18 @@ async def receive_legacy_activity(user_id: str, payload: dict):
 
 # ---------------- MOBILE DATA ----------------
 
-@router.post("/mobile")
+@router.post("/mobile", responses={400: {"description": "Unknown device and no user_id provided"}})
 async def receive_mobile_usage(data: dict):
 
     device_id = data.get("device_id")
     user_id = data.get("user_id") or await resolve_user(device_id)
-    
+
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown device and no user_id provided -- pair this device first."
+        )
+
     record = {
         "_id": str(uuid.uuid4()),
         "user_id": user_id,

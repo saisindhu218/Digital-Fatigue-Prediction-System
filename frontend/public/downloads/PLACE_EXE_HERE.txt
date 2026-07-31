@@ -1,0 +1,23 @@
+Put CongiGuardAgent.exe in this folder before deploying the frontend.
+
+Why it's not already here: the actual .exe has to be built ON WINDOWS
+(PyInstaller can't cross-compile a Windows binary from this repo's build
+environment). Steps:
+
+    cd desktop-agent
+    pip install -r requirements.txt
+    build_exe.bat
+
+That produces desktop-agent\dist\CongiGuardAgent.exe -- copy that file
+into this folder (frontend/public/downloads/CongiGuardAgent.exe) before
+your next `npm run build` / Netlify deploy. Netlify serves everything
+under `public/` as static files at the site root, so it will then be
+reachable at:
+
+    https://<your-site>.netlify.app/downloads/CongiGuardAgent.exe
+
+which is exactly the path AgentSetupPage.tsx links to.
+
+Delete this .txt file once the real .exe is in place (it's just a
+placeholder so the empty folder isn't lost from git, which ignores empty
+directories by default).

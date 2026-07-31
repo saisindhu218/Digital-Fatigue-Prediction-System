@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import DashboardLayout from "@/components/DashboardLayout";
+import AgentGate from "@/components/AgentGate";
 import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
@@ -36,13 +37,15 @@ function AppRoutes() {
       <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
       <Route path="/signup" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage initialMode="signup" />} />
       <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
-      <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/predictions" element={<PredictionsPage />} />
-        <Route path="/recommendations" element={<RecommendationsPage />} />
-        <Route path="/devices" element={<DevicePairingPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
+      <Route element={<ProtectedRoute><AgentGate /></ProtectedRoute>}>
+        <Route element={<DashboardLayout />}>
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/predictions" element={<PredictionsPage />} />
+          <Route path="/recommendations" element={<RecommendationsPage />} />
+          <Route path="/devices" element={<DevicePairingPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+        </Route>
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>

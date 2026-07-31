@@ -4,8 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useEffect, useState } from 'react';
 import { useUsageData } from '@/hooks/useUsageData';
 
-const API_BASE =
-  "https://digital-fatigue-prediction-system.onrender.com/api/v1";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
 
 function formatISTDateTime(value?: string | null): string {
   if (!value) return 'Never';
@@ -58,6 +57,31 @@ export default function DevicePairingPage() {
     try{
       const res = await fetch(`${API_BASE}/pairing/status?user_id=${userId}`);
       const data = await res.json();
+
+      // Overlay live heartbeat status from the desktop agent, which is a
+      // more reliable "is it actually running right now" signal than
+      // inferring connectivity from recent usage_data rows.
+      try {
+        const agentRes = await fetch(`${API_BASE}/pairing/agent-status?user_id=${userId}`);
+        if (agentRes.ok) {
+          const agentData = await agentRes.json();
+          const onlineById: Record<string, boolean> = {};
+          for (const d of agentData.devices || []) {
+            onlineById[d.device_id] = d.online;
+          }
+
+          if (data.devices) {
+            data.devices = data.devices.map((d: any) =>
+              d.device_id in onlineById
+                ? { ...d, status: onlineById[d.device_id] ? "connected" : "disconnected" }
+                : d
+            );
+          }
+        }
+      } catch {
+        // Non-fatal: fall back to the original status payload as-is.
+      }
+
       setStatus(data);
       return data;
     }catch(e){
@@ -213,7 +237,7 @@ export default function DevicePairingPage() {
     const id = (device?.device_id || '').toLowerCase();
     const hasTestMarker = /test|sample|mock|demo/.test(name) || /test|sample|mock|demo/.test(id);
 
-    return !hasTestMarker;
+    return device?.status === 'connected' && !hasTestMarker;
   });
 
   return (

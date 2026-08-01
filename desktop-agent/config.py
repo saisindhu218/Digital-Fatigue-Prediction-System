@@ -15,6 +15,12 @@ from pathlib import Path
 APP_NAME = "CongiGuard"
 AGENT_VERSION = "1.0.0"
 
+# Baked-in production backend URL. This is what makes the packaged .exe
+# work out of the box for real end users -- no environment variable, no
+# setup. CONGIGUARD_SERVER_URL (if set) still overrides this, which is
+# how local dev/testing points the agent at localhost instead.
+PRODUCTION_SERVER_URL = "https://digital-fatigue-prediction-system.onrender.com"
+
 # Where we keep persistent state (token, device id, server url).
 if os.name == "nt":
     _base = Path(os.getenv("APPDATA", Path.home()))
@@ -23,8 +29,6 @@ else:
 
 CONFIG_DIR = _base / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "agent_config.json"
-
-DEFAULT_SERVER_URL = os.getenv("CONGIGUARD_SERVER_URL", "").strip() or None
 
 
 def _ensure_dir():
@@ -69,21 +73,22 @@ def get_server_url() -> str:
       1. Value already saved in agent_config.json (set automatically the
          moment you run `pair` or `login` -- persists across terminals,
          no env var needed again)
-      2. CONGIGUARD_SERVER_URL environment variable
-      3. Local dev default (http://localhost:8000) -- if you're pairing
-         against a deployed backend, set CONGIGUARD_SERVER_URL once
-         before your first `pair`/`login` and it'll be remembered from
-         then on.
+      2. CONGIGUARD_SERVER_URL environment variable -- set this to
+         override for local dev (e.g. http://localhost:8000)
+      3. Baked-in production URL (PRODUCTION_SERVER_URL above) -- this is
+         what a real end user's freshly downloaded .exe uses by default,
+         zero setup required.
     """
     cfg = load_config()
 
     if cfg.get("server_url"):
         return cfg["server_url"].rstrip("/")
 
-    if DEFAULT_SERVER_URL:
-        return DEFAULT_SERVER_URL.rstrip("/")
+    env_override = os.getenv("CONGIGUARD_SERVER_URL", "").strip()
+    if env_override:
+        return env_override.rstrip("/")
 
-    return "http://localhost:8000"
+    return PRODUCTION_SERVER_URL
 
 
 def set_server_url(url: str) -> None:

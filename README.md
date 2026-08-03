@@ -1,16 +1,6 @@
 # AI-Based Digital Fatigue & Productivity Risk Prediction System
 
-> **Updated:** added `desktop-agent/` — a packaged background tracker
-> (login once → auto-starts at Windows logon → uploads activity + sends
-> a heartbeat every 30s) that replaces manually running
-> `backend/src/laptop_collector/activity_logger.py`. See
-> [`desktop-agent/README.md`](desktop-agent/README.md) for setup, and
-> `backend/src/routes/pairing.py`'s `/heartbeat` and `/agent-status`
-> endpoints for how the dashboard now detects "laptop connected" reliably.
-> Also fixed: `frontend/src/pages/DevicePairingPage.tsx` was hardcoded to
-> `http://localhost:8000`, which broke device status entirely once the
-> frontend was deployed to Netlify — it now respects `VITE_API_BASE_URL`
-> like the rest of the app.
+
 
 An AI-powered full-stack application that monitors digital behavior, predicts fatigue and productivity risks, and provides personalized recommendations through real-time analytics. The system combines web and mobile platforms with Machine Learning to help users improve focus, productivity, and digital well-being.
 

@@ -16,6 +16,8 @@ Scheduled Task launches.
 """
 
 import getpass
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -28,6 +30,89 @@ import config
 import heartbeat
 import uploader
 from logger import ActivityLogger
+
+
+TASK_NAME = "CongiGuardAgent"
+
+
+def _get_own_exe_path() -> str | None:
+    """Returns the path to THIS running program, wherever the user
+    actually put it -- works no matter where the .exe was downloaded to,
+    since it doesn't assume any fixed folder structure."""
+    if getattr(sys, "frozen", False):
+        # Running as a PyInstaller-built .exe
+        return sys.executable
+    return None  # Running from source (python main.py) -- nothing to register
+
+
+def _get_startup_folder_path() -> str:
+    return os.path.join(
+        os.getenv("APPDATA", ""),
+        "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+    )
+
+
+def _register_via_startup_folder(exe_path: str) -> bool:
+    """Fallback auto-start method that needs ZERO special permissions --
+    any file placed in this per-user folder runs automatically at every
+    Windows login. Used when schtasks is blocked (common on
+    managed/locked-down machines via Group Policy, even without needing
+    real admin rights for the scheduled task itself)."""
+
+    try:
+        startup_dir = _get_startup_folder_path()
+        os.makedirs(startup_dir, exist_ok=True)
+
+        launcher_path = os.path.join(startup_dir, "CongiGuardAgent.bat")
+        with open(launcher_path, "w", encoding="utf-8") as f:
+            f.write(f'@echo off\r\nstart "" "{exe_path}" run\r\n')
+
+        print(f"✅ Registered to start automatically at Windows login (Startup folder: {launcher_path})")
+        return True
+    except Exception as e:
+        print(f"⚠️ Startup folder registration also failed: {e}")
+        return False
+
+
+def ensure_auto_start_registered():
+    """Registers this agent to start automatically at every Windows
+    login, using THIS exe's actual current location. Tries a Scheduled
+    Task first; if that's blocked (Access denied -- common on managed/
+    locked-down machines), falls back to the classic Startup folder
+    method instead, which needs no special permissions at all.
+    No-op on non-Windows or when running from source."""
+
+    if os.name != "nt":
+        return
+
+    exe_path = _get_own_exe_path()
+    if not exe_path:
+        return  # running from source, e.g. `python main.py` during dev
+
+    try:
+        result = subprocess.run(
+            [
+                "schtasks", "/Create",
+                "/TN", TASK_NAME,
+                "/TR", f'"{exe_path}" run',
+                "/SC", "ONLOGON",
+                "/RL", "LIMITED",
+                "/F",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            print(f"✅ Registered to start automatically at Windows login (from {exe_path})")
+            return
+        else:
+            print(f"⚠️ Scheduled Task registration blocked: {result.stderr.strip()}")
+            print("   Trying the Startup folder method instead...")
+    except Exception as e:
+        print(f"⚠️ Scheduled Task registration failed: {e}")
+        print("   Trying the Startup folder method instead...")
+
+    if not _register_via_startup_folder(exe_path):
+        print("   You can still run 'CongiGuardAgent.exe run' manually any time.")
 
 SAMPLE_INTERVAL_SECONDS = 60          # take one activity snapshot per minute
                                        # (upload cadence is now controlled by
@@ -74,7 +159,8 @@ def cmd_pair(code: str | None):
     config.set_server_url(server_url)  # remember it -- no env var needed next time
     print(f"✅ Paired successfully. This laptop is now linked to your account.")
     print(f"   Server saved: {server_url}")
-    print("You can now run: python main.py run")
+    ensure_auto_start_registered()
+    print("Tracking will start automatically from now on -- you can close this window.")
 
 
 def cmd_login(email: str | None, password: str | None):
@@ -91,7 +177,8 @@ def cmd_login(email: str | None, password: str | None):
         config.set_server_url(server_url)  # remember it -- no env var needed next time
         print(f"✅ Logged in. user_id={user_id}")
         print(f"   Server saved: {server_url}")
-        print("You can now run: python main.py run")
+        ensure_auto_start_registered()
+        print("Tracking will start automatically from now on -- you can close this window.")
     except auth.AuthError as e:
         print(f"❌ Login failed: {e}")
         sys.exit(1)
@@ -171,6 +258,8 @@ def main():
         cmd_login(email, password)
     elif args[0] == "status":
         cmd_status()
+    elif args[0] == "install":
+        ensure_auto_start_registered()
     else:
         print(__doc__)
 

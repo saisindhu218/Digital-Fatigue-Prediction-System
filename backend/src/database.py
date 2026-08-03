@@ -60,7 +60,8 @@ class Database:
 
             # DEVICES COLLECTION
             await self.db.devices.create_index("user_id")
-            await self.db.devices.create_index("device_id", unique=True)
+            await self._deduplicate_devices()
+            await self._ensure_unique_index("devices", "device_id")
 
             # USAGE DATA COLLECTION
             await self.db.usage_data.create_index("user_id")
@@ -109,6 +110,88 @@ class Database:
                 await collection.create_index(field, expireAfterSeconds=expire_seconds)
             else:
                 raise
+    async def _ensure_unique_index(self, collection_name: str, field: str):
+        """Same idea as _ensure_ttl_index but for a plain unique index --
+        this one specifically fixes 'devices.device_id', which has been
+        silently failing to become unique since a non-unique index with
+        the same auto-generated name already existed in the live
+        database from before this constraint was added. That silent
+        failure (only ever logged as a startup warning, never actually
+        fixed) is what allowed duplicate device_id documents to pile up,
+        which in turn confused the connected-devices UI."""
+
+        collection = self.db[collection_name]
+
+        try:
+            await collection.create_index(field, unique=True)
+        except OperationFailure as e:
+            if getattr(e, "code", None) in (85, 86):
+                old_index_name = f"{field}_1"
+                try:
+                    await collection.drop_index(old_index_name)
+                except OperationFailure:
+                    pass
+                await collection.create_index(field, unique=True)
+            else:
+                raise
+
+    async def _deduplicate_devices(self):
+        """One-time (repeats harmlessly every startup) cleanup: merges
+        duplicate 'devices' documents that share the same device_id --
+        a side effect of the unique index above never actually applying
+        until now. Keeps whichever duplicate has the most recent
+        last_heartbeat (falling back to last_active, then paired_at),
+        deletes the rest. Required before the unique index can be
+        created at all -- Mongo refuses a unique index while duplicates
+        still exist."""
+
+        try:
+            duplicates_cursor = self.db.devices.aggregate([
+                {"$group": {
+                    "_id": "$device_id",
+                    "ids": {"$push": "$_id"},
+                    "count": {"$sum": 1},
+                }},
+                {"$match": {"count": {"$gt": 1}}},
+            ])
+            duplicate_groups = await duplicates_cursor.to_list(length=None)
+
+            for group in duplicate_groups:
+                device_id = group["_id"]
+                if not device_id:
+                    continue
+
+                docs_cursor = self.db.devices.find({"device_id": device_id})
+                docs = await docs_cursor.to_list(length=None)
+
+                def sort_key(d):
+                    return (
+                        d.get("last_heartbeat")
+                        or d.get("last_active")
+                        or d.get("paired_at")
+                    )
+
+                docs_with_dates = [d for d in docs if sort_key(d) is not None]
+                docs_without_dates = [d for d in docs if sort_key(d) is None]
+
+                if docs_with_dates:
+                    docs_with_dates.sort(key=sort_key, reverse=True)
+                    keep = docs_with_dates[0]
+                    remove = docs_with_dates[1:] + docs_without_dates
+                else:
+                    keep = docs[0]
+                    remove = docs[1:]
+
+                remove_ids = [d["_id"] for d in remove]
+                if remove_ids:
+                    await self.db.devices.delete_many({"_id": {"$in": remove_ids}})
+                    print(
+                        f"🧹 Merged {len(remove_ids)} duplicate device record(s) "
+                        f"for device_id={device_id}, kept most recent"
+                    )
+        except Exception as e:
+            print(f"⚠️ Device deduplication warning (non-fatal): {e}")
+
 
     def disconnect(self):
 

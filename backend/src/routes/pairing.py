@@ -689,9 +689,13 @@ async def agent_status(user_id: str):
         print(f"❌ DB error in agent_status: {e}")
         raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
 
-    results = []
+    results_by_device_id = {}
     for device in devices:
         if is_test_device_record(device_id=device.get("device_id"), device_name=device.get("device_name")):
+            continue
+
+        device_id = device.get("device_id")
+        if not device_id:
             continue
 
         last_heartbeat = device.get("last_heartbeat")
@@ -702,17 +706,28 @@ async def agent_status(user_id: str):
                 hb = hb.replace(tzinfo=timezone.utc)
             online = hb >= cutoff
 
-        results.append({
-            "device_id": device.get("device_id"),
-            "device_name": device.get("device_name") or device.get("device_id"),
+        entry = {
+            "device_id": device_id,
+            "device_name": device.get("device_name") or device_id,
             "device_type": device.get("device_type", "unknown"),
             "hostname": device.get("hostname"),
             "agent_version": device.get("agent_version"),
             "online": online,
             "last_heartbeat": last_heartbeat.isoformat() if last_heartbeat else None,
-        })
+        }
 
-    return {"devices": results}
+        existing = results_by_device_id.get(device_id)
+        if existing is None:
+            results_by_device_id[device_id] = entry
+        elif online and not existing["online"]:
+            results_by_device_id[device_id] = entry
+        elif online == existing["online"]:
+            existing_hb = existing["last_heartbeat"] or ""
+            new_hb = entry["last_heartbeat"] or ""
+            if new_hb > existing_hb:
+                results_by_device_id[device_id] = entry
+
+    return {"devices": list(results_by_device_id.values())}
 
 
 @router.post("/disconnect", responses={404: {"description": "Device not found"}})

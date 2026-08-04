@@ -32,3 +32,5 @@ dist-ssr/
 
 # Env files with secrets
 .env
+
+backend/src/laptop_collector/minute_activity_buffer.json

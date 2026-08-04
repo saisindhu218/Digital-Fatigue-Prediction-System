@@ -188,10 +188,19 @@ class ActivityLogger:
         app_counter = Counter(r.get("active_app", "Unknown") for r in chunk)
         category_counter = Counter(r.get("app_category", "MEDIUM") for r in chunk)
 
+        # Per-app minute breakdown WITHIN this window -- each raw sample
+        # in `chunk` represents exactly 1 real minute, so counting which
+        # app was active in each one gives real per-app minutes, not just
+        # a single "dominant app" for the whole 10-minute block. This is
+        # what lets the dashboard show a real multi-app breakdown instead
+        # of whichever app happened to win the window.
+        app_breakdown = dict(app_counter)
+
         return {
             "timestamp": latest.get("timestamp"),
             "active_app": app_counter.most_common(1)[0][0] if app_counter else "Unknown",
             "app_category": category_counter.most_common(1)[0][0] if category_counter else "MEDIUM",
+            "app_breakdown": app_breakdown,
             # usage_duration is in MINUTES per the backend's convention --
             # this record represents AGGREGATE_WINDOW minutes of activity.
             "usage_duration": AGGREGATE_WINDOW,

@@ -2,17 +2,19 @@
 CongiGuard Desktop Agent - entry point.
 
 Usage:
-    python main.py pair <CODE>                 # recommended: pair using the
-                                                  # code shown on the website
-                                                  # (no password needed)
+    Double-click the .exe (or run with no arguments) -- if not yet
+    paired, it will interactively ask for the pairing code shown on the
+    website, then start tracking automatically. If already paired, it
+    just starts tracking straight away.
+
+    python main.py pair <CODE>                 # pair non-interactively
     python main.py login <email> <password>   # alternative: email/password
-    python main.py login                       # interactive prompt
-    python main.py run                          # start background tracking
+    python main.py login                       # interactive login prompt
+    python main.py run                          # start tracking (skips pairing check UI)
     python main.py status                       # show current config/state
 
 When packaged with PyInstaller (see build_exe.bat), this becomes
-CongiGuardAgent.exe, and `run` mode is what the Startup shortcut /
-Scheduled Task launches.
+CongiGuardAgent.exe.
 """
 
 import getpass
@@ -74,12 +76,45 @@ def _register_via_startup_folder(exe_path: str) -> bool:
         return False
 
 
+def _remove_startup_folder_entry():
+    """Deletes any leftover Startup-folder launcher from a previous run
+    -- needed when switching TO the Scheduled Task method, so a stale
+    entry pointing at an old/moved .exe path doesn't linger and fail at
+    every login alongside the working registration."""
+    try:
+        launcher_path = os.path.join(_get_startup_folder_path(), "CongiGuardAgent.bat")
+        if os.path.exists(launcher_path):
+            os.remove(launcher_path)
+    except Exception:
+        pass  # best-effort cleanup, not worth failing pairing over
+
+
+def _remove_scheduled_task():
+    """Deletes any leftover Scheduled Task from a previous run -- needed
+    when switching TO the Startup folder method, for the same reason as
+    above, in reverse."""
+    try:
+        subprocess.run(
+            ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception:
+        pass  # best-effort cleanup
+
+
 def ensure_auto_start_registered():
     """Registers this agent to start automatically at every Windows
     login, using THIS exe's actual current location. Tries a Scheduled
     Task first; if that's blocked (Access denied -- common on managed/
     locked-down machines), falls back to the classic Startup folder
     method instead, which needs no special permissions at all.
+
+    Whichever method succeeds, the OTHER method's leftovers (from a
+    previous run, possibly pointing at an old/moved .exe path) get
+    cleaned up -- otherwise both can end up registered at once, and
+    Windows tries to launch a stale, no-longer-existing path at every
+    login alongside the correct one.
+
     No-op on non-Windows or when running from source."""
 
     if os.name != "nt":
@@ -103,6 +138,7 @@ def ensure_auto_start_registered():
         )
         if result.returncode == 0:
             print(f"✅ Registered to start automatically at Windows login (from {exe_path})")
+            _remove_startup_folder_entry()
             return
         else:
             print(f"⚠️ Scheduled Task registration blocked: {result.stderr.strip()}")
@@ -111,8 +147,11 @@ def ensure_auto_start_registered():
         print(f"⚠️ Scheduled Task registration failed: {e}")
         print("   Trying the Startup folder method instead...")
 
-    if not _register_via_startup_folder(exe_path):
+    if _register_via_startup_folder(exe_path):
+        _remove_scheduled_task()
+    else:
         print("   You can still run 'CongiGuardAgent.exe run' manually any time.")
+
 
 SAMPLE_INTERVAL_SECONDS = 60          # take one activity snapshot per minute
                                        # (upload cadence is now controlled by
@@ -142,17 +181,17 @@ def cmd_pair(code: str | None):
         )
     except requests.RequestException as e:
         print(f"❌ Could not reach server at {server_url}: {e}")
-        sys.exit(1)
+        return False
 
     if response.status_code == 404:
         print("❌ That code is invalid. Double-check it and try again.")
-        sys.exit(1)
+        return False
     if response.status_code == 410:
         print("❌ That code has expired. Generate a new one on the website and retry.")
-        sys.exit(1)
+        return False
     if response.status_code != 200:
         print(f"❌ Pairing failed: {response.status_code} {response.text[:200]}")
-        sys.exit(1)
+        return False
 
     user_id = response.json().get("user_id")
     config.save_paired_user(user_id)
@@ -160,7 +199,7 @@ def cmd_pair(code: str | None):
     print(f"✅ Paired successfully. This laptop is now linked to your account.")
     print(f"   Server saved: {server_url}")
     ensure_auto_start_registered()
-    print("Tracking will start automatically from now on -- you can close this window.")
+    return True
 
 
 def cmd_login(email: str | None, password: str | None):
@@ -198,12 +237,9 @@ def _heartbeat_loop(stop_event: threading.Event):
         stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
 
 
-def cmd_run():
-    if not config.get_user_id():
-        print("❌ Not paired/logged in yet.")
-        print("   Run: python main.py pair <CODE>   (code shown on the website)")
-        print("   or:  python main.py login")
-        sys.exit(1)
+def _run_tracking_loop():
+    """The actual tracking loop -- assumes pairing has already been
+    confirmed by the caller."""
 
     print("=" * 60)
     print("CongiGuard Desktop Agent - starting background tracking")
@@ -244,14 +280,54 @@ def cmd_run():
         stop_event.set()
 
 
+def cmd_run():
+    """Used by the Scheduled Task / Startup entry -- assumes pairing is
+    already done, exits with an error message if not (no interactive
+    prompt here, since there may be no one watching this window)."""
+    if not config.get_user_id():
+        print("❌ Not paired/logged in yet.")
+        print("   Run: CongiGuardAgent.exe pair <CODE>   (code shown on the website)")
+        sys.exit(1)
+
+    _run_tracking_loop()
+
+
+def cmd_default():
+    """What happens on a plain double-click / no arguments. This is the
+    real first-time-user experience: if not paired yet, ask for the code
+    right here (no separate terminal, no command syntax to remember),
+    then start tracking immediately in the same window. If already
+    paired, just start tracking straight away."""
+
+    if not config.get_user_id():
+        print("=" * 60)
+        print("Welcome to CongiGuard")
+        print("=" * 60)
+        print("This laptop isn't linked to an account yet.")
+        print("Go to your dashboard's 'Connect this laptop' page to get a code.")
+        print()
+
+        if not cmd_pair(None):
+            print("\nPairing failed. Close this window, get a fresh code, and try again.")
+            input("Press Enter to exit...")
+            sys.exit(1)
+
+        print()
+
+    _run_tracking_loop()
+
+
 def main():
     args = sys.argv[1:]
 
-    if not args or args[0] == "run":
+    if not args:
+        cmd_default()
+    elif args[0] == "run":
         cmd_run()
     elif args[0] == "pair":
         code = args[1] if len(args) > 1 else None
-        cmd_pair(code)
+        if cmd_pair(code):
+            print("You can now run: CongiGuardAgent.exe run  (or just double-click it)")
     elif args[0] == "login":
         email = args[1] if len(args) > 1 else None
         password = args[2] if len(args) > 2 else None

@@ -78,7 +78,8 @@ async def receive_laptop_usage(data: dict):
         "mouse_clicks": data.get("mouse_clicks", 0),
         "mouse_moves": data.get("mouse_moves", 0),
         "app_switches": data.get("app_switches", 0),
-        "time_of_day": data.get("time_of_day")
+        "time_of_day": data.get("time_of_day"),
+        "app_breakdown": data.get("app_breakdown", {})
     }
 
     try:
@@ -129,7 +130,8 @@ async def receive_laptop_batch(payload: dict):
             "mouse_clicks": r.get("mouse_clicks", 0),
             "mouse_moves": r.get("mouse_moves", 0),
             "app_switches": r.get("app_switches", 0),
-            "time_of_day": r.get("time_of_day")
+            "time_of_day": r.get("time_of_day"),
+            "app_breakdown": r.get("app_breakdown", {})
         }
 
         try:

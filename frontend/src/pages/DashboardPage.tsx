@@ -162,17 +162,22 @@ const productivityVsFatigueData = Array.from(
     return timeA - timeB;
   });
 
-// ✅ Combine app usage (group by app name)
+// ✅ Combine app usage (group by app name) -- prefer the real per-app
+// breakdown when a record has one (post-fix uploads), fall back to the
+// single dominant-app field for older records that predate this fix.
 const appMap: Record<string, number> = {};
 
 (laptop_usage || []).forEach((u: any) => {
-  const appName = u.active_app || "Unknown";
+  const breakdown = u.app_breakdown;
 
-  if (!appMap[appName]) {
-    appMap[appName] = 0;
+  if (breakdown && Object.keys(breakdown).length > 0) {
+    Object.entries(breakdown).forEach(([appName, minutes]) => {
+      appMap[appName] = (appMap[appName] || 0) + (Number(minutes) || 0);
+    });
+  } else {
+    const appName = u.active_app || "Unknown";
+    appMap[appName] = (appMap[appName] || 0) + (u.usage_duration || 0);
   }
-
-  appMap[appName] += (u.usage_duration || 0);
 });
 
 const totalMinutes = Object.values(appMap).reduce((a, b) => a + b, 0);

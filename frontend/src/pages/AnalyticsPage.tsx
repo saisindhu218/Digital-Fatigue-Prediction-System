@@ -127,18 +127,10 @@ export default function AnalyticsPage() {
     appMap[app] = (appMap[app] || 0) + (u.usage_duration || 0);
   });
 
-  const sortedByTime = [...recentLaptopUsage].sort(
-    (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-
-  let weeklyBreaks = 0;
-  for (let i = 1; i < sortedByTime.length; i++) {
-    const prev = new Date(sortedByTime[i - 1].timestamp).getTime();
-    const curr = new Date(sortedByTime[i].timestamp).getTime();
-    if (curr - prev > 10 * 60 * 1000) {
-      weeklyBreaks++;
-    }
-  }
+  // Real break/sleep stats now come from the backend (data_type: "break"
+  // records, logged when the desktop agent detects the laptop was
+  // asleep) -- see breakFrequency/avgBreakMinutes below, sourced from
+  // the /analytics response instead of a timestamp-gap guess.
 
   const totalMinutes = Object.values(dailyMap).reduce((a, b) => a + b, 0);
   const avgScreenTime = Math.round((totalMinutes / 7 / 60) * 100) / 100;
@@ -166,7 +158,8 @@ export default function AnalyticsPage() {
     : 'None';
   
   // Break count inferred from >10-minute activity gaps in past 7 days
-  const breakFrequency = weeklyBreaks;
+  const breakFrequency = analytics.breaks_7day_count ?? 0;
+  const avgBreakMinutes = analytics.avg_break_minutes ?? 0;
 
   /* ---------------- DAILY USAGE ---------------- */
 
@@ -327,7 +320,7 @@ export default function AnalyticsPage() {
         />
         <StatCard title="Focus"  value={`${focusScore}%`}       icon={<Target />} />
         <StatCard title="App"    value={mostUsedApp}            icon={<Zap />} />
-        <StatCard title="Breaks" value={`${breakFrequency}`}     icon={<Coffee />} />
+        <StatCard title="Breaks" value={`${breakFrequency}`} subtitle={`Avg: ${avgBreakMinutes} min`} icon={<Coffee />} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

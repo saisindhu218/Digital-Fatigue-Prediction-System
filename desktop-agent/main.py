@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta
 
 import requests
 
@@ -159,6 +160,12 @@ SAMPLE_INTERVAL_SECONDS = 60          # take one activity snapshot per minute
                                        # samples collapse into 1 upload)
 HEARTBEAT_INTERVAL_SECONDS = 30       # "I'm alive" ping
 
+# If the gap between two consecutive loop ticks (which normally run every
+# 1 second) is bigger than this, the laptop was almost certainly asleep
+# (lid closed) rather than the app just being briefly slow. Comfortably
+# above normal scheduling jitter, comfortably below "definitely asleep".
+SLEEP_GAP_THRESHOLD_SECONDS = 90
+
 
 def cmd_pair(code: str | None):
     """Pairs this laptop to an account using the 6-character code shown
@@ -257,11 +264,45 @@ def _run_tracking_loop():
     heartbeat.send_heartbeat()
 
     last_sample_time = time.time()
+    last_tick_time = time.time()
 
     try:
         while True:
             time.sleep(1)
             now = time.time()
+
+            # ---- Sleep/resume detection ----
+            # If way more real time passed than the 1-second sleep()
+            # call accounts for, the laptop was suspended (lid closed)
+            # for that gap, not just briefly slow.
+            tick_gap = now - last_tick_time
+            if tick_gap > SLEEP_GAP_THRESHOLD_SECONDS:
+                gap_seconds = tick_gap
+                sleep_start = datetime.now() - timedelta(seconds=gap_seconds)
+                sleep_end = datetime.now()
+
+                print(f"[SLEEP] Detected laptop was asleep for {gap_seconds/60:.1f} min")
+
+                if not uploader.upload_break(
+                    start_iso=sleep_start.isoformat(),
+                    end_iso=sleep_end.isoformat(),
+                    duration_minutes=round(gap_seconds / 60, 2),
+                    session_id=session_id,
+                ):
+                    print("[SLEEP] Failed to log break (non-fatal, continuing)")
+
+                # Don't let the sleep gap corrupt idle-time or session-
+                # length math -- pretend the agent "started" this much
+                # later, and reset the idle-time clock to now.
+                activity_logger.session_start += timedelta(seconds=gap_seconds)
+                activity_logger.last_input_time = datetime.now()
+                last_sample_time = now  # skip counting the gap as a sample
+
+                # Heartbeat immediately so the dashboard reflects "back
+                # online" right away instead of waiting up to 30s.
+                heartbeat.send_heartbeat()
+
+            last_tick_time = now
 
             if now - last_sample_time >= SAMPLE_INTERVAL_SECONDS:
                 activity_logger.collect_minute_sample()

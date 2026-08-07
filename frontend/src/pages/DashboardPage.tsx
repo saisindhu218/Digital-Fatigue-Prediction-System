@@ -1,7 +1,7 @@
 import { useTrends, useUsageData } from '@/hooks/useUsageData';
 import { StatCard } from '@/components/StatCard';
 import { ChartCard } from '@/components/ChartCard';
-import { Brain, Activity, Monitor, Layers, TrendingDown } from 'lucide-react';
+import { Brain, Activity, Monitor, Layers, TrendingDown, Coffee } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar,
   PieChart, Pie, Cell,
@@ -162,22 +162,17 @@ const productivityVsFatigueData = Array.from(
     return timeA - timeB;
   });
 
-// ✅ Combine app usage (group by app name) -- prefer the real per-app
-// breakdown when a record has one (post-fix uploads), fall back to the
-// single dominant-app field for older records that predate this fix.
+// ✅ Combine app usage (group by app name)
 const appMap: Record<string, number> = {};
 
 (laptop_usage || []).forEach((u: any) => {
-  const breakdown = u.app_breakdown;
+  const appName = u.active_app || "Unknown";
 
-  if (breakdown && Object.keys(breakdown).length > 0) {
-    Object.entries(breakdown).forEach(([appName, minutes]) => {
-      appMap[appName] = (appMap[appName] || 0) + (Number(minutes) || 0);
-    });
-  } else {
-    const appName = u.active_app || "Unknown";
-    appMap[appName] = (appMap[appName] || 0) + (u.usage_duration || 0);
+  if (!appMap[appName]) {
+    appMap[appName] = 0;
   }
+
+  appMap[appName] += (u.usage_duration || 0);
 });
 
 const totalMinutes = Object.values(appMap).reduce((a, b) => a + b, 0);
@@ -619,6 +614,17 @@ Risk Level:
 </div>
 
 </ChartCard>
+</div>
+
+<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+<StatCard
+title="Breaks"
+value={summary.breaks_today_count ?? 0}
+subtitle={`Total: ${summary.breaks_today_total_minutes ?? 0} min today`}
+icon={<Coffee className="w-4 h-4"/>}
+/>
+
 </div>
 </div>
 

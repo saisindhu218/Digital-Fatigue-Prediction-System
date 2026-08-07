@@ -78,8 +78,7 @@ async def receive_laptop_usage(data: dict):
         "mouse_clicks": data.get("mouse_clicks", 0),
         "mouse_moves": data.get("mouse_moves", 0),
         "app_switches": data.get("app_switches", 0),
-        "time_of_day": data.get("time_of_day"),
-        "app_breakdown": data.get("app_breakdown", {})
+        "time_of_day": data.get("time_of_day")
     }
 
     try:
@@ -130,8 +129,7 @@ async def receive_laptop_batch(payload: dict):
             "mouse_clicks": r.get("mouse_clicks", 0),
             "mouse_moves": r.get("mouse_moves", 0),
             "app_switches": r.get("app_switches", 0),
-            "time_of_day": r.get("time_of_day"),
-            "app_breakdown": r.get("app_breakdown", {})
+            "time_of_day": r.get("time_of_day")
         }
 
         try:
@@ -239,6 +237,53 @@ async def receive_mobile_usage(data: dict):
         return {"status": "ok"}
     except PyMongoError as e:
         print(f"❌ DB write error in /mobile: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
+
+
+# ---------------- LOG BREAK (SLEEP/LID-CLOSED GAP) ----------------
+
+@router.post("/break", responses={400: {"description": "Unknown device and no user_id provided"}})
+async def receive_break(data: dict):
+    """Logs a detected sleep/lid-closed gap as its own record type,
+    completely separate from regular laptop activity -- data_type
+    "break" is never matched by any laptop-filtered query, so it can
+    never leak into screen time, app usage, or fatigue/productivity
+    calculations. Only used for the dedicated Breaks stat."""
+
+    device_id = data.get("device_id")
+    user_id = data.get("user_id") or await resolve_user(device_id)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown device and no user_id provided -- pair this device first."
+        )
+
+    try:
+        duration_minutes = float(data.get("duration_minutes", 0) or 0)
+    except (TypeError, ValueError):
+        duration_minutes = 0
+
+    if duration_minutes <= 0:
+        return {"status": "ignored", "reason": "non-positive duration"}
+
+    record = {
+        "_id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "device_id": device_id,
+        "session_id": data.get("session_id"),
+        "timestamp": utc_now(),
+        "data_type": "break",
+        "start_time": data.get("start_time"),
+        "end_time": data.get("end_time"),
+        "duration_minutes": round(duration_minutes, 2),
+    }
+
+    try:
+        await db.db.usage_data.insert_one(record)
+        return {"status": "ok"}
+    except PyMongoError as e:
+        print(f"❌ DB write error in /break: {e}")
         raise HTTPException(status_code=503, detail="Database temporarily unavailable. Please try again later.")
 
 
@@ -362,6 +407,12 @@ async def get_recent_usage(user_id: str, hours: int = 24):
             "timestamp": {"$gte": cutoff}
         }).to_list(None)
 
+        break_data = await db.db.usage_data.find({
+            "user_id": user_id,
+            "data_type": "break",
+            "timestamp": {"$gte": cutoff}
+        }).to_list(None)
+
         predictions = await db.db.predictions.find({
             "user_id": user_id,
             "timestamp": {"$gte": cutoff}   # 🔥 same cutoff as usage_data
@@ -384,6 +435,8 @@ async def get_recent_usage(user_id: str, hours: int = 24):
                 "most_used_app": "None",
                 "focus_score": 0,
                 "break_frequency": 0,
+                "breaks_today_count": 0,
+                "breaks_today_total_minutes": 0,
                 "peak_hours": "None"
             },
             "predictions": {
@@ -440,6 +493,10 @@ async def get_recent_usage(user_id: str, hours: int = 24):
 
     focus_score = max(0, min(100, 100 - total_sessions))
 
+    breaks_today_count = len(break_data)
+    breaks_today_total_minutes = round(
+        sum((b.get("duration_minutes", 0) or 0) for b in break_data), 2
+    )
 
     summary = {
         "total_screen_time": round(total_screen_time, 2),
@@ -448,6 +505,8 @@ async def get_recent_usage(user_id: str, hours: int = 24):
         "most_used_app": most_used_app,
         "focus_score": focus_score,
         "break_frequency": max(1, int(total_sessions / 5)),
+        "breaks_today_count": breaks_today_count,
+        "breaks_today_total_minutes": breaks_today_total_minutes,
         "peak_hours": "Afternoon"
     }
 
@@ -691,7 +750,13 @@ async def get_analytics(user_id: str):
         "data_type": "laptop",
         "timestamp": {"$gte": cutoff_utc}
     }).to_list(2000)
-    
+
+    break_records = await db.db.usage_data.find({
+        "user_id": user_id,
+        "data_type": "break",
+        "timestamp": {"$gte": cutoff_utc}
+    }).to_list(2000)
+
     if not records:
         return {}
 
@@ -760,12 +825,22 @@ async def get_analytics(user_id: str):
     total_usage = sum([d["usage"] for d in daily_usage_data])
     avg_daily = total_usage / 7  # Always average over 7 days
     
+    # -------- BREAKS (cumulative over 7 days) --------
+    breaks_7day_count = len(break_records)
+    avg_break_minutes = round(
+        (sum((b.get("duration_minutes", 0) or 0) for b in break_records) / breaks_7day_count)
+        if breaks_7day_count else 0,
+        2,
+    )
+
     return {
         
         "range": "7 days",
         "avg_daily_usage": round(avg_daily,2),
         "focus_ratio": focus_ratio,
         "most_used_app": most_used_app,
+        "breaks_7day_count": breaks_7day_count,
+        "avg_break_minutes": avg_break_minutes,
         "hourly": hourly_data,
         "weekly": weekly_data,
         "daily": daily_usage_data,

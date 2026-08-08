@@ -219,6 +219,18 @@ async def receive_mobile_usage(data: dict):
             detail="Unknown device and no user_id provided -- pair this device first."
         )
 
+    # usage_duration is in MINUTES, matching the laptop convention exactly
+    # -- this is what lets daily totals be summed the same way for both.
+    # screen_time is accepted as a fallback for any older/other client
+    # that might still send that field name.
+    usage_duration = data.get("usage_duration")
+    if usage_duration is None:
+        usage_duration = data.get("screen_time", 0)
+    try:
+        usage_duration = float(usage_duration or 0)
+    except (TypeError, ValueError):
+        usage_duration = 0
+
     record = {
         "_id": str(uuid.uuid4()),
         "user_id": user_id,
@@ -226,7 +238,7 @@ async def receive_mobile_usage(data: dict):
         "timestamp": utc_now(),
         "data_type": "mobile",
         "app_name": data.get("app_name"),
-        "screen_time": data.get("screen_time"),
+        "usage_duration": usage_duration,
         "notifications_received": data.get("notifications_received")
     }
 
@@ -753,6 +765,12 @@ async def get_analytics(user_id: str):
         "timestamp": {"$gte": cutoff_utc}
     }).to_list(2000)
 
+    mobile_records_7day = await db.db.usage_data.find({
+        "user_id": user_id,
+        "data_type": "mobile",
+        "timestamp": {"$gte": cutoff_utc}
+    }).to_list(2000)
+
     break_records = await db.db.usage_data.find({
         "user_id": user_id,
         "data_type": "break",
@@ -769,22 +787,32 @@ async def get_analytics(user_id: str):
     from collections import defaultdict
 
     daily_usage = defaultdict(int)
-    
+    daily_mobile_usage = defaultdict(int)
+
     # Initialize all 7 days with 0
     for i in range(7):
         day_date = (ist_now - timedelta(days=i)).date()
         daily_usage[day_date] = 0
+        daily_mobile_usage[day_date] = 0
 
     for r in filtered:
         d = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(IST).date()
         daily_usage[d] += r.get("usage_duration", 0)
+
+    for r in mobile_records_7day:
+        d = r["timestamp"].replace(tzinfo=pytz.utc).astimezone(IST).date()
+        daily_mobile_usage[d] += r.get("usage_duration", 0)
 
     # Sort by date (oldest to newest)
     daily_usage_data = []
     for i in range(6, -1, -1):  # Last 7 days in order
         day_date = (ist_now - timedelta(days=i)).date()
         day_str = day_date.strftime("%d %b")
-        daily_usage_data.append({"date": day_str, "usage": daily_usage.get(day_date, 0)})
+        daily_usage_data.append({
+            "date": day_str,
+            "usage": daily_usage.get(day_date, 0),
+            "mobile_minutes": daily_mobile_usage.get(day_date, 0),
+        })
     # -------- MOST USED APP --------
     app_map = {}
 

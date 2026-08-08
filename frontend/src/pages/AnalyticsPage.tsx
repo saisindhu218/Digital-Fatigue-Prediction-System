@@ -168,31 +168,10 @@ export default function AnalyticsPage() {
   const tomorrowIstLabel = getIstDayLabel(tomorrow);
 
 
-  const getMobileDummyHours = (label: string): number => {
-    const cleaned = label.trim();
-
-    const mobileData: Record<string, number> = {
-      "03 May": 5 + (42 / 60),
-      "04 May": 6 + (46 / 60),
-      "05 May": 6 + (16 / 60),
-      "06 May": 7 + (2 / 60),
-      "07 May": 7 + (59 / 60),
-      "08 May": 7 + (11 / 60),
-      "09 May": 1 + (30 / 60),
-    };
-
-    return mobileData[cleaned] || 0;
-  };
-
-//  const getMobileDummyHours = (dayKey: string, dayLabel: string): number => {
-//    if (dayKey === tomorrowIstKey || dayLabel === tomorrowIstLabel) {
- //     return 3 + (10 / 60); // 3 hr 10 min only for tomorrow
-  //  }
-
-    // Deterministic 4-8 hr range so values stay stable per day but shift as days roll.
-//    const hash = dayKey.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-//    return 4 + (hash % 9) * 0.5;
-// };
+  // Real mobile screen time now comes from the backend's
+  // mobile_minutes field per day (see dailyUsageFromAnalytics below) --
+  // previously this was a hardcoded fake lookup table with dates from
+  // "May" that never matched real dates, always silently showing 0.
 
   const dailyUsageFromAnalytics = (analytics.daily ?? []).map((d: any, index: number) => {
     const rawLabel = String(d.date || '').trim();
@@ -207,7 +186,7 @@ export default function AnalyticsPage() {
     return {
       date: rawLabel || dayLabel,
       usage: Number(d.usage || 0) / 60,
-      mobile: getMobileDummyHours(dayLabel),
+      mobile: Number(d.mobile_minutes || 0) / 60,
       order: index,
     };
   });
@@ -220,7 +199,7 @@ export default function AnalyticsPage() {
         return {
           date: dayLabel,
           usage: 0,
-          mobile: getMobileDummyHours(dayLabel),
+          mobile: 0,
           order: index,
         };
       });

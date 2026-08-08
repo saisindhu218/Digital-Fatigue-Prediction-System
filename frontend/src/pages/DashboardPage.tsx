@@ -162,17 +162,24 @@ const productivityVsFatigueData = Array.from(
     return timeA - timeB;
   });
 
-// ✅ Combine app usage (group by app name)
+// ✅ Combine app usage (group by app name) -- prefer the real per-app
+// breakdown when a record has one (post-fix uploads), fall back to the
+// single dominant-app field for older records that predate this fix.
+// This is what makes small/brief apps show up even if they were never
+// the SINGLE dominant app in any 10-minute window.
 const appMap: Record<string, number> = {};
 
 (laptop_usage || []).forEach((u: any) => {
-  const appName = u.active_app || "Unknown";
+  const breakdown = u.app_breakdown;
 
-  if (!appMap[appName]) {
-    appMap[appName] = 0;
+  if (breakdown && Object.keys(breakdown).length > 0) {
+    Object.entries(breakdown).forEach(([appName, minutes]) => {
+      appMap[appName] = (appMap[appName] || 0) + (Number(minutes) || 0);
+    });
+  } else {
+    const appName = u.active_app || "Unknown";
+    appMap[appName] = (appMap[appName] || 0) + (u.usage_duration || 0);
   }
-
-  appMap[appName] += (u.usage_duration || 0);
 });
 
 const totalMinutes = Object.values(appMap).reduce((a, b) => a + b, 0);
@@ -541,6 +548,8 @@ icon={<Layers className="w-4 h-4"/>}
 
 </ChartCard>
 
+<div className="flex flex-col gap-4">
+
 <ChartCard 
   title="AI Productivity Analysis"
   subtitle="Estimated loss based on behavioral patterns"
@@ -614,9 +623,6 @@ Risk Level:
 </div>
 
 </ChartCard>
-</div>
-
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
 <StatCard
 title="Breaks"
@@ -625,6 +631,7 @@ subtitle={`Total: ${summary.breaks_today_total_minutes ?? 0} min today`}
 icon={<Coffee className="w-4 h-4"/>}
 />
 
+</div>
 </div>
 </div>
 

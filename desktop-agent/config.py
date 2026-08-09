@@ -21,15 +21,6 @@ AGENT_VERSION = "1.0.0"
 # how local dev/testing points the agent at localhost instead.
 PRODUCTION_SERVER_URL = "https://digital-fatigue-prediction-system.onrender.com"
 
-# Where we keep persistent state (token, device id, server url).
-if os.name == "nt":
-    _base = Path(os.getenv("APPDATA", Path.home()))
-else:
-    _base = Path.home() / ".config"
-
-CONFIG_DIR = _base / APP_NAME
-CONFIG_FILE = CONFIG_DIR / "agent_config.json"
-
 
 def _ensure_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -127,3 +118,24 @@ def clear_tokens() -> None:
     for key in ("access_token", "refresh_token", "user_id"):
         cfg.pop(key, None)
     save_config(cfg)
+
+
+def describe_network_error(e: Exception) -> str:
+    """Turns a raw requests/urllib3 exception (often several nested lines
+    of connection-pool internals) into one short, readable phrase for
+    the console. Used everywhere the agent reports a failed request, so
+    the terminal stays readable instead of dumping a full traceback-style
+    message for routine, expected things like a laptop just having woken
+    from sleep with WiFi not reconnected yet."""
+
+    text = str(e)
+
+    if "getaddrinfo failed" in text or "NameResolutionError" in text:
+        return "no internet connection right now (DNS lookup failed)"
+    if "timed out" in text.lower():
+        return "server took too long to respond"
+    if "Connection refused" in text:
+        return "server refused the connection"
+    if "Max retries exceeded" in text:
+        return "could not reach the server after several attempts"
+    return "network error"

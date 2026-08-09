@@ -2,6 +2,8 @@
 Uploads one aggregated 10-minute activity record to the backend.
 """
 
+import time
+
 import requests
 
 import auth
@@ -55,7 +57,7 @@ def upload_aggregate(aggregate_record: dict, session_id: str) -> bool:
             timeout=15,
         )
     except requests.RequestException as e:
-        print(f"[UPLOAD] Network error: {e}")
+        print(f"[UPLOAD] {config.describe_network_error(e)}")
         return False
 
     if response.status_code == 200:
@@ -70,12 +72,28 @@ def upload_aggregate(aggregate_record: dict, session_id: str) -> bool:
     return False
 
 
-def upload_break(start_iso: str, end_iso: str, duration_minutes: float, session_id: str) -> bool:
+def upload_break(
+    start_iso: str,
+    end_iso: str,
+    duration_minutes: float,
+    session_id: str,
+    max_retries: int = 4,
+    retry_delay_seconds: float = 8.0,
+) -> bool:
     """Sends a detected sleep/lid-closed gap to the backend as a break
     record -- kept completely separate from regular activity uploads
     (different data_type on the backend) so it never gets counted as
     screen time or fed into fatigue/productivity analysis, only shown
-    as its own "Breaks" stat."""
+    as its own "Breaks" stat.
+
+    Unlike upload_aggregate (which naturally retries on the next
+    10-minute window since the caller keeps unsent data), a break event
+    is one-off -- if the first attempt fails, there's no "next window"
+    to retry it on. And the very first attempt right after waking from
+    sleep is exactly when it's MOST likely to fail, since WiFi typically
+    takes a few seconds to reconnect after resume. So this retries a
+    handful of times with a short delay before actually giving up,
+    instead of a single silent failure."""
 
     server_url = config.get_server_url()
     device_id = config.get_or_create_device_id()
@@ -94,19 +112,28 @@ def upload_break(start_iso: str, end_iso: str, duration_minutes: float, session_
         "duration_minutes": duration_minutes,
     }
 
-    try:
-        response = requests.post(
-            f"{server_url}/api/v1/usage/break",
-            json=payload,
-            timeout=15,
-        )
-    except requests.RequestException as e:
-        print(f"[BREAK] Network error: {e}")
+    last_error_summary = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.post(
+                f"{server_url}/api/v1/usage/break",
+                json=payload,
+                timeout=15,
+            )
+        except requests.RequestException as e:
+            last_error_summary = config.describe_network_error(e)
+            if attempt < max_retries:
+                time.sleep(retry_delay_seconds)
+                continue
+            print(f"[BREAK] {last_error_summary} (gave up after {max_retries} attempts)")
+            return False
+
+        if response.status_code == 200:
+            print(f"[BREAK] Logged {duration_minutes:.1f} min break")
+            return True
+
+        print(f"[BREAK] Server rejected: {response.status_code} {response.text[:200]}")
         return False
 
-    if response.status_code == 200:
-        print(f"[BREAK] Logged {duration_minutes:.1f} min break")
-        return True
-
-    print(f"[BREAK] Server rejected: {response.status_code} {response.text[:200]}")
     return False

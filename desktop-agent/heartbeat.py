@@ -36,5 +36,5 @@ def send_heartbeat() -> bool:
         )
         return response.status_code == 200
     except requests.RequestException as e:
-        print(f"[HEARTBEAT] Network error: {e}")
+        print(f"[HEARTBEAT] {config.describe_network_error(e)}")
         return False

@@ -21,6 +21,15 @@ AGENT_VERSION = "1.0.0"
 # how local dev/testing points the agent at localhost instead.
 PRODUCTION_SERVER_URL = "https://digital-fatigue-prediction-system.onrender.com"
 
+# Where we keep persistent state (token, device id, server url).
+if os.name == "nt":
+    _base = Path(os.getenv("APPDATA", Path.home()))
+else:
+    _base = Path.home() / ".config"
+
+CONFIG_DIR = _base / APP_NAME
+CONFIG_FILE = CONFIG_DIR / "agent_config.json"
+
 
 def _ensure_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)

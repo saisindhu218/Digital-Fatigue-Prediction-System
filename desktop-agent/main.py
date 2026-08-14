@@ -382,4 +382,20 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        # Without this, an unhandled crash anywhere in the program just
+        # closes the console window instantly -- looks like the app
+        # "vanished" with zero explanation. Print the real error and
+        # wait for a keypress so it's actually visible before closing.
+        import traceback
+        print("\n" + "=" * 60)
+        print("CongiGuard crashed. Full error below:")
+        print("=" * 60)
+        traceback.print_exc()
+        print("=" * 60)
+        input("\nPress Enter to close this window...")
+        sys.exit(1)

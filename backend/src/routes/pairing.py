@@ -196,8 +196,12 @@ async def verify_pairing(token: str, scanning_device_id: str):
                     "paired_at": utc_now(),
                     "pairing_status": DevicePairingStatus.PAIRED,
                     "last_active": utc_now()
-                }
-            }
+                },
+                "$setOnInsert": {
+                    "_id": str(uuid.uuid4()),
+                },
+            },
+            upsert=True,
         )
 
         await db.db.devices.update_one(

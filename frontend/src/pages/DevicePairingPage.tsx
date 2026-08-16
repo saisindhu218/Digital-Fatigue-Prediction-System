@@ -71,12 +71,19 @@ export default function DevicePairingPage() {
           }
 
           if (data.devices) {
-            data.devices = data.devices.map((d: any) =>
-              d.device_id in onlineById
+            data.devices = data.devices.map((d: any) => {
+              // Heartbeat-based overlay only applies to laptops -- the desktop
+              // agent is the only client that ever sends a heartbeat. Mobile
+              // devices have no heartbeat mechanism, so this overlay would
+              // always mark them offline even when correctly paired and active,
+              // silently overwriting the correct status already computed above.
+              if (d.device_type === "mobile") return d;
+
+              return d.device_id in onlineById
                 ? { ...d, status: onlineById[d.device_id] ? "connected" : "disconnected" }
-                : d
-            );
-          }
+                : d;
+            });
+        }
         }
       } catch {
         // Non-fatal: fall back to the original status payload as-is.

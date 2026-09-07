@@ -195,7 +195,9 @@ async def verify_pairing(token: str, scanning_device_id: str):
                     "user_id": qr_token["user_id"],
                     "paired_at": utc_now(),
                     "pairing_status": DevicePairingStatus.PAIRED,
-                    "last_active": utc_now()
+                    "last_active": utc_now(),
+                    "device_type": "laptop" if scanning_device_id.startswith("laptop_") else "mobile",
+                    "status": "connected",
                 },
                 "$setOnInsert": {
                     "_id": str(uuid.uuid4()),

@@ -244,6 +244,10 @@ async def receive_mobile_usage(data: dict):
 
     try:
         await db.db.usage_data.insert_one(record)
+        await db.db.devices.update_one(
+            {"device_id": device_id},
+            {"$set": {"status": "connected", "last_active": utc_now()}},
+        )
 
         if user_id:
             await run_prediction(user_id)

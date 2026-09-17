@@ -126,15 +126,18 @@ export default function AnalyticsPage() {
     const app = u.active_app || 'Unknown';
     appMap[app] = (appMap[app] || 0) + (u.usage_duration || 0);
   });
+  // Combine laptop + mobile minutes per day, straight from the same
+  // source the Daily Usage Pattern chart already uses -- the old
+  // version only ever summed laptop minutes, which is why this card
+  // showed almost nothing even once mobile syncing started working.
+  const combinedDailyTotals = (analytics.daily ?? []).map(
+    (d: any) => Number(d.usage || 0) + Number(d.mobile_minutes || 0)
+  );
+  const avgScreenTime = combinedDailyTotals.length > 0
+    ? Math.round((combinedDailyTotals.reduce((a, b) => a + b, 0) / 7 / 60) * 100) / 100
+    : 0;
 
-  // Real break/sleep stats now come from the backend (data_type: "break"
-  // records, logged when the desktop agent detects the laptop was
-  // asleep) -- see breakFrequency/avgBreakMinutes below, sourced from
-  // the /analytics response instead of a timestamp-gap guess.
-
-  const totalMinutes = Object.values(dailyMap).reduce((a, b) => a + b, 0);
-  const avgScreenTime = Math.round((totalMinutes / 7 / 60) * 100) / 100;
-  
+    
   // Calculate focus directly from DB usage logs (no random/default summary blending).
   const weeklyFocusTotals = recentLaptopUsage.reduce(
     (acc: { weighted: number; minutes: number }, u: any) => {
